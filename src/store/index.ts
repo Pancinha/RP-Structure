@@ -42,6 +42,7 @@ function syncClient(client: Client) {
 interface StoreState {
   clients: Client[]
   loading: boolean
+  loadError: string | null
   loadClients: () => Promise<void>
   setClients: (clients: Client[]) => void
   addClient: (data: Omit<Client, 'id' | 'facebook' | 'bmReceptiva' | 'numeroReceptivo' | 'bmAtiva' | 'numeroAtivo' | 'dataCrazy' | 'historico' | 'criadoEm' | 'atualizadoEm'>) => void
@@ -62,14 +63,14 @@ interface StoreState {
 export const useStore = create<StoreState>()((set, get) => ({
   clients: [],
   loading: true,
+  loadError: null,
 
   loadClients: async () => {
-    set({ loading: true })
+    set({ loading: true, loadError: null })
     try {
       const { data, error } = await supabase
         .from('clients')
         .select('data')
-        .order('created_at', { ascending: true })
 
       if (error) throw error
 
@@ -88,8 +89,9 @@ export const useStore = create<StoreState>()((set, get) => ({
       })
 
       set({ clients, loading: false })
-    } catch {
-      set({ loading: false })
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : JSON.stringify(err)
+      set({ loading: false, loadError: msg })
     }
   },
 

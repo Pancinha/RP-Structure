@@ -27,12 +27,30 @@ function LoadingScreen() {
 export default function App() {
   const loadClients = useStore((s) => s.loadClients)
   const loading = useStore((s) => s.loading)
+  const loadError = useStore((s) => s.loadError)
 
   useEffect(() => {
     loadClients()
   }, [loadClients])
 
   if (loading) return <LoadingScreen />
+
+  if (loadError) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 p-6">
+        <div className="bg-white border border-red-200 rounded-xl p-6 max-w-lg w-full">
+          <p className="text-sm font-bold text-red-700 mb-2">Erro ao conectar com o banco de dados</p>
+          <pre className="text-xs text-red-600 bg-red-50 rounded p-3 overflow-auto whitespace-pre-wrap">{loadError}</pre>
+          <button
+            onClick={() => loadClients()}
+            className="mt-4 px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700"
+          >
+            Tentar novamente
+          </button>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <BrowserRouter>
