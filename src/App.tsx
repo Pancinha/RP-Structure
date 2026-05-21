@@ -1,6 +1,11 @@
-import { useEffect, Component, type ReactNode } from 'react'
+import { useEffect, useState, Component, type ReactNode } from 'react'
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import { useStore } from './store'
+import { supabase } from './lib/supabase'
+import { LoginPage } from './pages/Login'
+
+type LoginStep = 'credentials' | 'mfa-challenge' | 'mfa-enroll' | 'mfa-enroll-verify'
+type AuthStatus = 'checking' | 'login' | 'authenticated'
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: string | null }> {
   state = { error: null }
@@ -22,6 +27,7 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { error: string |
     return this.props.children
   }
 }
+
 import { Layout } from './components/layout/Layout'
 import { Dashboard } from './pages/Dashboard'
 import { Clients } from './pages/Clients'
@@ -46,14 +52,74 @@ function LoadingScreen() {
 }
 
 export default function App() {
+  const [authStatus, setAuthStatus] = useState<AuthStatus>('checking')
+  const [loginStep, setLoginStep] = useState<LoginStep>('credentials')
+
   const loadClients = useStore((s) => s.loadClients)
   const loading = useStore((s) => s.loading)
   const loadError = useStore((s) => s.loadError)
 
   useEffect(() => {
-    loadClients()
-  }, [loadClients])
+    checkAuth()
 
+    // Listen for sign-out or session expiry
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'SIGNED_OUT' || event === 'TOKEN_REFRESHED') {
+        // On sign-out go back to login; on token refresh re-check auth level
+        if (event === 'SIGNED_OUT') {
+          setAuthStatus('login')
+          setLoginStep('credentials')
+        }
+      }
+    })
+
+    return () => subscription.unsubscribe()
+  }, [])
+
+  async function checkAuth() {
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+
+      if (!session) {
+        setAuthStatus('login')
+        setLoginStep('credentials')
+        return
+      }
+
+      const { data: aal } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel()
+
+      if (aal?.currentLevel === 'aal2') {
+        // Fully authenticated
+        setAuthStatus('authenticated')
+        loadClients()
+        return
+      }
+
+      // AAL1 session — determine which login step to resume
+      const { data: factors } = await supabase.auth.mfa.listFactors()
+      const hasVerifiedFactor = factors?.totp?.some((f) => f.status === 'verified') ?? false
+
+      setLoginStep(hasVerifiedFactor ? 'mfa-challenge' : 'credentials')
+      setAuthStatus('login')
+    } catch {
+      setAuthStatus('login')
+      setLoginStep('credentials')
+    }
+  }
+
+  function handleAuthenticated() {
+    setAuthStatus('authenticated')
+    loadClients()
+  }
+
+  // ── Auth gate ──────────────────────────────────
+  if (authStatus === 'checking') return <LoadingScreen />
+
+  if (authStatus === 'login') {
+    return <LoginPage initialStep={loginStep} onAuthenticated={handleAuthenticated} />
+  }
+
+  // ── Authenticated — wait for data ──────────────
   if (loading) return <LoadingScreen />
 
   if (loadError) {
@@ -75,21 +141,21 @@ export default function App() {
 
   return (
     <ErrorBoundary>
-    <BrowserRouter>
-      <Routes>
-        <Route path="/" element={<Layout />}>
-          <Route index element={<Dashboard />} />
-          <Route path="clientes" element={<Clients />} />
-          <Route path="clientes/:id" element={<ClientDetail />} />
-          <Route path="tarefas" element={<Tasks />} />
-          <Route path="bms" element={<BMs />} />
-          <Route path="numeros" element={<Numbers />} />
-          <Route path="automacoes" element={<Automations />} />
-          <Route path="pendencias" element={<Pendencias />} />
-          <Route path="configuracoes" element={<Settings />} />
-        </Route>
-      </Routes>
-    </BrowserRouter>
+      <BrowserRouter>
+        <Routes>
+          <Route path="/" element={<Layout />}>
+            <Route index element={<Dashboard />} />
+            <Route path="clientes" element={<Clients />} />
+            <Route path="clientes/:id" element={<ClientDetail />} />
+            <Route path="tarefas" element={<Tasks />} />
+            <Route path="bms" element={<BMs />} />
+            <Route path="numeros" element={<Numbers />} />
+            <Route path="automacoes" element={<Automations />} />
+            <Route path="pendencias" element={<Pendencias />} />
+            <Route path="configuracoes" element={<Settings />} />
+          </Route>
+        </Routes>
+      </BrowserRouter>
     </ErrorBoundary>
   )
 }

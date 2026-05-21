@@ -11,8 +11,10 @@ import {
   Settings,
   Download,
   CheckCircle,
+  LogOut,
 } from 'lucide-react'
 import { useStore } from '../../store'
+import { supabase } from '../../lib/supabase'
 
 const BACKUP_KEY = 'rp-structure-last-backup'
 
@@ -144,10 +146,17 @@ export function Sidebar() {
 
       <div className="p-4 border-t border-gray-200">
         <div className="flex items-center gap-2">
-          <div className="w-7 h-7 bg-gray-200 rounded-full flex items-center justify-center">
+          <div className="w-7 h-7 bg-gray-200 rounded-full flex items-center justify-center flex-shrink-0">
             <span className="text-gray-700 text-xs font-medium">R</span>
           </div>
-          <span className="text-sm text-gray-700 font-medium">Rafael</span>
+          <span className="text-sm text-gray-700 font-medium flex-1 truncate">Rafael</span>
+          <button
+            onClick={() => supabase.auth.signOut()}
+            title="Sair"
+            className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+          >
+            <LogOut size={15} />
+          </button>
         </div>
       </div>
     </aside>
