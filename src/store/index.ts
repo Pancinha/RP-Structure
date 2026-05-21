@@ -31,12 +31,14 @@ function deriveStatusFromNumber(statusFinal: StatusNumero): StatusReceptivo {
   }
 }
 
-// Upsert a single client to Supabase (fire-and-forget)
+// Upsert a single client to Supabase (fire-and-forget with error logging)
 function syncClient(client: Client) {
   supabase
     .from('clients')
     .upsert({ id: client.id, data: client, updated_at: new Date().toISOString() })
-    .then()
+    .then(({ error }) => {
+      if (error) console.error('[syncClient] Supabase upsert error:', error)
+    })
 }
 
 interface StoreState {
