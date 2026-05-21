@@ -1,6 +1,27 @@
-import { useEffect } from 'react'
+import { useEffect, Component, type ReactNode } from 'react'
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import { useStore } from './store'
+
+class ErrorBoundary extends Component<{ children: ReactNode }, { error: string | null }> {
+  state = { error: null }
+  static getDerivedStateFromError(e: Error) { return { error: e.message + '\n' + e.stack } }
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="min-h-screen flex items-center justify-center bg-gray-50 p-6">
+          <div className="bg-white border border-red-200 rounded-xl p-6 max-w-2xl w-full">
+            <p className="text-sm font-bold text-red-700 mb-2">Erro de renderização</p>
+            <pre className="text-xs text-red-600 bg-red-50 rounded p-3 overflow-auto whitespace-pre-wrap max-h-64">{this.state.error}</pre>
+            <button onClick={() => window.location.reload()} className="mt-4 px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700">
+              Recarregar
+            </button>
+          </div>
+        </div>
+      )
+    }
+    return this.props.children
+  }
+}
 import { Layout } from './components/layout/Layout'
 import { Dashboard } from './pages/Dashboard'
 import { Clients } from './pages/Clients'
@@ -53,6 +74,7 @@ export default function App() {
   }
 
   return (
+    <ErrorBoundary>
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<Layout />}>
@@ -68,5 +90,6 @@ export default function App() {
         </Route>
       </Routes>
     </BrowserRouter>
+    </ErrorBoundary>
   )
 }
