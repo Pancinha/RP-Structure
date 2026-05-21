@@ -27,6 +27,7 @@ export function applyFacebookAutomation(
     statusGeral: 'Aguardando 24h',
     proximaAcao: 'Aguardar 24h e acessar novamente para iniciar criação/verificação da BM',
     prazoProximaAcao: add24h(),
+    pendencia: '',
     historico: [...client.historico, entry],
     atualizadoEm: new Date().toISOString(),
   }
@@ -43,6 +44,7 @@ export function applyBMReceptivaAutomation(
     updates.statusGeral = 'BM receptiva em análise'
     updates.proximaAcao = 'Verificar aprovação da BM receptiva'
     updates.prazoProximaAcao = add24h()
+    updates.pendencia = ''
     updates.historico = [...client.historico, entry]
   }
 
@@ -51,6 +53,7 @@ export function applyBMReceptivaAutomation(
     updates.statusGeral = 'BM receptiva aprovada'
     updates.proximaAcao = 'Separar e ativar número receptivo'
     updates.prazoProximaAcao = ''
+    updates.pendencia = ''
     updates.historico = [...client.historico, entry]
   }
 
@@ -58,7 +61,21 @@ export function applyBMReceptivaAutomation(
     const entry = makeHistoryEntry('bm_receptiva', 'BM receptiva recusada pelo Meta')
     updates.statusGeral = 'Cliente com pendência'
     updates.pendencia = 'BM receptiva recusada — verificar motivo e reenviar'
+    updates.proximaAcao = ''
+    updates.prazoProximaAcao = ''
     updates.historico = [...client.historico, entry]
+  }
+
+  if (newStatus === 'Com pendência') {
+    const entry = makeHistoryEntry('bm_receptiva', 'BM receptiva com pendência')
+    updates.statusGeral = 'Cliente com pendência'
+    updates.pendencia = 'BM receptiva com pendência — verificar e resolver'
+    updates.historico = [...client.historico, entry]
+  }
+
+  // Qualquer mudança para status de progresso limpa pendência anterior
+  if (['Criando', 'Dados preenchidos', 'Site/domínio pendente', 'Não iniciada'].includes(newStatus)) {
+    updates.pendencia = ''
   }
 
   return updates
@@ -76,6 +93,7 @@ export function applyNumeroReceptivoAutomation(
     statusGeral: 'Receptivo pronto',
     proximaAcao: 'Configurar BM ativa',
     prazoProximaAcao: '',
+    pendencia: '',
     historico: [...client.historico, entry],
     atualizadoEm: new Date().toISOString(),
   }
@@ -92,6 +110,7 @@ export function applyBMAtivaAutomation(
     updates.statusGeral = 'BM ativa em análise'
     updates.proximaAcao = 'Verificar aprovação da BM ativa'
     updates.prazoProximaAcao = add24h()
+    updates.pendencia = ''
     updates.historico = [...client.historico, entry]
   }
 
@@ -100,6 +119,7 @@ export function applyBMAtivaAutomation(
     updates.statusGeral = 'BM ativa aprovada'
     updates.proximaAcao = 'Separar e ativar número ativo'
     updates.prazoProximaAcao = ''
+    updates.pendencia = ''
     updates.historico = [...client.historico, entry]
   }
 
@@ -107,7 +127,21 @@ export function applyBMAtivaAutomation(
     const entry = makeHistoryEntry('bm_ativa', 'BM ativa recusada pelo Meta')
     updates.statusGeral = 'Cliente com pendência'
     updates.pendencia = 'BM ativa recusada — verificar motivo e reenviar'
+    updates.proximaAcao = ''
+    updates.prazoProximaAcao = ''
     updates.historico = [...client.historico, entry]
+  }
+
+  if (newStatus === 'Com pendência') {
+    const entry = makeHistoryEntry('bm_ativa', 'BM ativa com pendência')
+    updates.statusGeral = 'Cliente com pendência'
+    updates.pendencia = 'BM ativa com pendência — verificar e resolver'
+    updates.historico = [...client.historico, entry]
+  }
+
+  // Qualquer mudança para status de progresso limpa pendência anterior
+  if (['Criando', 'Dados preenchidos', 'Site/domínio pendente', 'Não iniciada'].includes(newStatus)) {
+    updates.pendencia = ''
   }
 
   return updates
@@ -122,6 +156,7 @@ export function applyNumeroAtivoAutomation(
   const entry = makeHistoryEntry('numero_ativo', 'Número ativo ativado e pronto')
   const updates: Partial<Client> = {
     statusAtivo: 'Pronto',
+    pendencia: '',
     historico: [...client.historico, entry],
     atualizadoEm: new Date().toISOString(),
   }
