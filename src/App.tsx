@@ -56,20 +56,20 @@ export default function App() {
   const [loginStep, setLoginStep] = useState<LoginStep>('credentials')
 
   const loadClients = useStore((s) => s.loadClients)
+  const subscribeToChanges = useStore((s) => s.subscribeToChanges)
+  const unsubscribeFromChanges = useStore((s) => s.unsubscribeFromChanges)
   const loading = useStore((s) => s.loading)
   const loadError = useStore((s) => s.loadError)
 
   useEffect(() => {
     checkAuth()
 
-    // Listen for sign-out or session expiry
+    // Listen for sign-out
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
-      if (event === 'SIGNED_OUT' || event === 'TOKEN_REFRESHED') {
-        // On sign-out go back to login; on token refresh re-check auth level
-        if (event === 'SIGNED_OUT') {
-          setAuthStatus('login')
-          setLoginStep('credentials')
-        }
+      if (event === 'SIGNED_OUT') {
+        unsubscribeFromChanges()
+        setAuthStatus('login')
+        setLoginStep('credentials')
       }
     })
 
@@ -92,6 +92,7 @@ export default function App() {
         // Fully authenticated
         setAuthStatus('authenticated')
         loadClients()
+        subscribeToChanges()
         return
       }
 
@@ -110,6 +111,7 @@ export default function App() {
   function handleAuthenticated() {
     setAuthStatus('authenticated')
     loadClients()
+    subscribeToChanges()
   }
 
   // ── Auth gate ──────────────────────────────────

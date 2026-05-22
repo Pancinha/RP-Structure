@@ -13,8 +13,11 @@ import {
   formatDate,
   isOverdue,
   isDueToday,
+  progressScore,
 } from '../../utils/format'
 import type { StatusGeral, Prioridade } from '../../types'
+
+type SortBy = 'progresso' | 'prioridade' | 'prazo'
 
 const STATUS_FILTER_OPTIONS: Array<StatusGeral | 'Todos'> = [
   'Todos',
@@ -47,6 +50,7 @@ export function Clients() {
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<StatusGeral | 'Todos'>('Todos')
   const [prioFilter, setPrioFilter] = useState<Prioridade | 'Todas'>('Todas')
+  const [sortBy, setSortBy] = useState<SortBy>('progresso')
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
 
   const filtered = clients.filter((c) => {
@@ -57,6 +61,15 @@ export function Clients() {
     const matchStatus = statusFilter === 'Todos' || c.statusGeral === statusFilter
     const matchPrio = prioFilter === 'Todas' || c.prioridade === prioFilter
     return matchSearch && matchStatus && matchPrio
+  }).sort((a, b) => {
+    if (sortBy === 'progresso') return progressScore(b.statusGeral) - progressScore(a.statusGeral)
+    if (sortBy === 'prioridade') {
+      const order = { Urgente: 0, Alta: 1, Média: 2, Baixa: 3 }
+      return order[a.prioridade] - order[b.prioridade]
+    }
+    if (!a.prazoProximaAcao) return 1
+    if (!b.prazoProximaAcao) return -1
+    return new Date(a.prazoProximaAcao).getTime() - new Date(b.prazoProximaAcao).getTime()
   })
 
   return (
@@ -84,7 +97,7 @@ export function Clients() {
               className="flex-1 border-0 outline-none text-sm text-gray-700 placeholder-gray-400"
             />
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <Filter size={14} className="text-gray-400" />
             <select
               value={statusFilter}
@@ -101,9 +114,18 @@ export function Clients() {
               className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
               <option value="Todas">Todas prioridades</option>
-              {(['Baixa', 'Média', 'Alta', 'Urgente'] as Prioridade[]).map((p) => (
+              {(['Urgente', 'Alta', 'Média', 'Baixa'] as Prioridade[]).map((p) => (
                 <option key={p} value={p}>{p}</option>
               ))}
+            </select>
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as SortBy)}
+              className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="progresso">Mais avançado primeiro</option>
+              <option value="prioridade">Por prioridade</option>
+              <option value="prazo">Por prazo</option>
             </select>
           </div>
         </div>

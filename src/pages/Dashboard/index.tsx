@@ -1,7 +1,8 @@
+import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Users, AlertCircle, Building2, Clock,
-  ChevronRight, TrendingUp, AlertTriangle,
+  ChevronRight, TrendingUp, AlertTriangle, Search, X,
 } from 'lucide-react'
 import { useStore } from '../../store'
 import { Badge } from '../../components/ui/Badge'
@@ -12,7 +13,9 @@ import {
   formatDate,
   isOverdue,
   isDueToday,
+  progressScore,
 } from '../../utils/format'
+import type { Prioridade } from '../../types'
 
 const PIPELINE_STAGES = [
   { label: 'Aguardando dados', key: 'Aguardando dados/acesso' },
@@ -35,10 +38,17 @@ function clientPipelineKey(statusGeral: string): string {
   return 'outros'
 }
 
+type QuickFilter = 'todos' | 'ativos' | 'pendencia' | 'prontos'
+
 export function Dashboard() {
   const clients = useStore((s) => s.clients)
   const navigate = useNavigate()
 
+  const [quickFilter, setQuickFilter] = useState<QuickFilter>('todos')
+  const [prioFilter, setPrioFilter] = useState<Prioridade | 'Todas'>('Todas')
+  const [search, setSearch] = useState('')
+
+  // ── Stats (always from all clients) ──────────────────────
   const total = clients.length
   const prontos = clients.filter((c) => c.statusGeral === 'Cliente pronto').length
   const emImplantacao = clients.filter(
@@ -76,14 +86,27 @@ export function Dashboard() {
     })
     .slice(0, 5)
 
-  const allSorted = [...clients].sort((a, b) => {
-    const order = { Urgente: 0, Alta: 1, Média: 2, Baixa: 3 }
-    const po = order[a.prioridade] - order[b.prioridade]
-    if (po !== 0) return po
-    if (!a.prazoProximaAcao) return 1
-    if (!b.prazoProximaAcao) return -1
-    return new Date(a.prazoProximaAcao).getTime() - new Date(b.prazoProximaAcao).getTime()
-  })
+  // ── Filtered + sorted table ────────────────────────────────
+  const filtered = clients
+    .filter((c) => {
+      if (search) {
+        const q = search.toLowerCase()
+        if (!c.nome.toLowerCase().includes(q) && !c.nomeConhecido.toLowerCase().includes(q)) return false
+      }
+      if (prioFilter !== 'Todas' && c.prioridade !== prioFilter) return false
+      if (quickFilter === 'ativos') return !['Cliente pronto', 'Cliente cancelado', 'Cliente pausado', 'Cliente com pendência'].includes(c.statusGeral)
+      if (quickFilter === 'pendencia') return c.statusGeral === 'Cliente com pendência' || !!c.pendencia
+      if (quickFilter === 'prontos') return c.statusGeral === 'Cliente pronto'
+      return true
+    })
+    .sort((a, b) => progressScore(b.statusGeral) - progressScore(a.statusGeral))
+
+  const QUICK_FILTERS: { key: QuickFilter; label: string; count: number }[] = [
+    { key: 'todos', label: 'Todos', count: clients.length },
+    { key: 'ativos', label: 'Em implantação', count: emImplantacao },
+    { key: 'pendencia', label: 'Com pendência', count: comAtencao },
+    { key: 'prontos', label: 'Prontos', count: prontos },
+  ]
 
   return (
     <div className="p-6 space-y-5">
@@ -118,6 +141,7 @@ export function Dashboard() {
           iconBg={comAtencao > 0 ? 'bg-red-100' : 'bg-gray-100'}
           iconColor={comAtencao > 0 ? 'text-red-600' : 'text-gray-400'}
           valueColor={comAtencao > 0 ? 'text-red-600' : 'text-gray-900'}
+          onClick={() => setQuickFilter('pendencia')}
         />
         <StatCard
           label="BMs em análise"
@@ -130,7 +154,7 @@ export function Dashboard() {
         />
       </div>
 
-      {/* Urgent alert — only shown when there are urgent items */}
+      {/* Urgent alert */}
       {urgentes.length > 0 && (
         <div className="bg-red-50 border border-red-200 rounded-xl p-4">
           <div className="flex items-center gap-2 mb-3">
@@ -175,7 +199,7 @@ export function Dashboard() {
         </div>
       )}
 
-      {/* Pipeline — compact */}
+      {/* Pipeline */}
       <Card className="p-4">
         <div className="flex items-center gap-2 mb-3">
           <TrendingUp size={15} className="text-gray-400" />
@@ -198,37 +222,89 @@ export function Dashboard() {
                       : 'bg-gray-50 border-gray-200'
                   }`}
                 >
-                  <span
-                    className={`font-bold text-base leading-none ${
-                      hasClients ? (isFinal ? 'text-green-600' : 'text-blue-600') : 'text-gray-300'
-                    }`}
-                  >
+                  <span className={`font-bold text-base leading-none ${hasClients ? (isFinal ? 'text-green-600' : 'text-blue-600') : 'text-gray-300'}`}>
                     {count}
                   </span>
                   <span className={`text-xs whitespace-nowrap ${hasClients ? 'text-gray-700' : 'text-gray-400'}`}>
                     {stage.label}
                   </span>
                 </div>
-                {!isLast && (
-                  <ChevronRight size={14} className="text-gray-300 mx-0.5 flex-shrink-0" />
-                )}
+                {!isLast && <ChevronRight size={14} className="text-gray-300 mx-0.5 flex-shrink-0" />}
               </div>
             )
           })}
         </div>
       </Card>
 
-      {/* Client table — full width */}
+      {/* Client table */}
       <Card>
-        <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-gray-700">Todos os clientes</h2>
-          <button
-            onClick={() => navigate('/clientes')}
-            className="text-xs text-blue-600 hover:underline"
-          >
-            Ver completo →
-          </button>
+        {/* Table header + filters */}
+        <div className="px-4 py-3 border-b border-gray-100 space-y-3">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <h2 className="text-sm font-semibold text-gray-700">
+              Clientes
+              <span className="ml-2 text-xs font-normal text-gray-400">{filtered.length} de {total}</span>
+            </h2>
+            <div className="flex items-center gap-2">
+              {/* Search */}
+              <div className="relative">
+                <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+                <input
+                  type="text"
+                  placeholder="Buscar..."
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  className="pl-7 pr-7 py-1.5 text-xs border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 w-36"
+                />
+                {search && (
+                  <button onClick={() => setSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                    <X size={12} />
+                  </button>
+                )}
+              </div>
+              {/* Priority filter */}
+              <select
+                value={prioFilter}
+                onChange={(e) => setPrioFilter(e.target.value as Prioridade | 'Todas')}
+                className="border border-gray-200 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="Todas">Todas prioridades</option>
+                {(['Urgente', 'Alta', 'Média', 'Baixa'] as Prioridade[]).map((p) => (
+                  <option key={p} value={p}>{p}</option>
+                ))}
+              </select>
+              <button
+                onClick={() => navigate('/clientes')}
+                className="text-xs text-blue-600 hover:underline whitespace-nowrap"
+              >
+                Ver completo →
+              </button>
+            </div>
+          </div>
+
+          {/* Quick filter pills */}
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {QUICK_FILTERS.map((f) => (
+              <button
+                key={f.key}
+                onClick={() => setQuickFilter(f.key)}
+                className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium transition-colors ${
+                  quickFilter === f.key
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                }`}
+              >
+                {f.label}
+                <span className={`text-xs rounded-full px-1.5 py-0.5 leading-none ${
+                  quickFilter === f.key ? 'bg-blue-500 text-white' : 'bg-gray-200 text-gray-500'
+                }`}>
+                  {f.count}
+                </span>
+              </button>
+            ))}
+          </div>
         </div>
+
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
@@ -243,7 +319,7 @@ export function Dashboard() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50">
-              {allSorted.map((client) => {
+              {filtered.map((client) => {
                 const overdue = client.prazoProximaAcao && isOverdue(client.prazoProximaAcao)
                 const today = client.prazoProximaAcao && isDueToday(client.prazoProximaAcao)
                 return (
@@ -280,19 +356,13 @@ export function Dashboard() {
                             {client.proximaAcao}
                           </p>
                           {client.prazoProximaAcao && (
-                            <p
-                              className={`text-xs mt-0.5 ${
-                                overdue
-                                  ? 'text-red-600 font-semibold'
-                                  : today
-                                  ? 'text-yellow-600 font-semibold'
-                                  : 'text-gray-400'
-                              }`}
-                            >
+                            <p className={`text-xs mt-0.5 ${overdue ? 'text-red-600 font-semibold' : today ? 'text-yellow-600 font-semibold' : 'text-gray-400'}`}>
                               {overdue ? '⚠ VENCIDO' : today ? '⚡ Hoje' : formatDate(client.prazoProximaAcao)}
                             </p>
                           )}
                         </div>
+                      ) : client.pendencia ? (
+                        <p className="text-xs text-red-600 truncate">⚠ {client.pendencia}</p>
                       ) : (
                         <span className="text-xs text-gray-300">—</span>
                       )}
@@ -303,10 +373,10 @@ export function Dashboard() {
                   </tr>
                 )
               })}
-              {clients.length === 0 && (
+              {filtered.length === 0 && (
                 <tr>
                   <td colSpan={7} className="px-4 py-10 text-center text-gray-400 text-sm">
-                    Nenhum cliente cadastrado.
+                    {clients.length === 0 ? 'Nenhum cliente cadastrado.' : 'Nenhum cliente corresponde aos filtros.'}
                   </td>
                 </tr>
               )}
@@ -319,13 +389,7 @@ export function Dashboard() {
 }
 
 function StatCard({
-  label,
-  value,
-  icon,
-  iconBg,
-  iconColor,
-  valueColor = 'text-gray-900',
-  sub,
+  label, value, icon, iconBg, iconColor, valueColor = 'text-gray-900', sub, onClick,
 }: {
   label: string
   value: number
@@ -334,9 +398,13 @@ function StatCard({
   iconColor: string
   valueColor?: string
   sub?: string
+  onClick?: () => void
 }) {
   return (
-    <Card className="p-4">
+    <div
+      className={`bg-white rounded-xl border border-gray-200 shadow-sm p-4 ${onClick ? 'cursor-pointer hover:shadow-md transition-shadow' : ''}`}
+      onClick={onClick}
+    >
       <div className="flex items-start justify-between gap-2">
         <div className="flex-1 min-w-0">
           <p className="text-xs text-gray-500 font-medium">{label}</p>
@@ -347,7 +415,7 @@ function StatCard({
           {icon}
         </div>
       </div>
-    </Card>
+    </div>
   )
 }
 
@@ -355,23 +423,8 @@ function StatusDot({ status }: { status: string }) {
   const isPronto = status === 'Pronto'
   const isPendente = status === 'Com pendência' || status === 'Com erro'
   const isNaoIniciado = status === 'Não iniciado'
-
-  const dotColor = isPronto
-    ? 'bg-green-500'
-    : isPendente
-    ? 'bg-red-500'
-    : isNaoIniciado
-    ? 'bg-gray-300'
-    : 'bg-blue-400'
-
-  const textColor = isPronto
-    ? 'text-green-700'
-    : isPendente
-    ? 'text-red-700'
-    : isNaoIniciado
-    ? 'text-gray-400'
-    : 'text-blue-700'
-
+  const dotColor = isPronto ? 'bg-green-500' : isPendente ? 'bg-red-500' : isNaoIniciado ? 'bg-gray-300' : 'bg-blue-400'
+  const textColor = isPronto ? 'text-green-700' : isPendente ? 'text-red-700' : isNaoIniciado ? 'text-gray-400' : 'text-blue-700'
   return (
     <div className="flex items-center gap-1.5">
       <span className={`w-2 h-2 rounded-full flex-shrink-0 ${dotColor}`} />

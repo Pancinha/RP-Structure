@@ -21,6 +21,9 @@ import {
 } from '../types'
 import { makeHistoryEntry } from '../utils/automation'
 
+// Held outside Zustand state so it doesn't trigger renders
+let realtimeChannel: ReturnType<typeof supabase.channel> | null = null
+
 function deriveStatusFromNumber(statusFinal: StatusNumero): StatusReceptivo {
   switch (statusFinal) {
     case 'Não iniciado': return 'Não iniciado'
@@ -60,6 +63,8 @@ interface StoreState {
   addAutomation: (clientId: string, automation: Automation) => void
   updateAutomation: (clientId: string, automationId: string, data: Partial<Automation>) => void
   deleteAutomation: (clientId: string, automationId: string) => void
+  subscribeToChanges: () => void
+  unsubscribeFromChanges: () => void
 }
 
 export const useStore = create<StoreState>()((set, get) => ({
@@ -329,5 +334,48 @@ export const useStore = create<StoreState>()((set, get) => ({
     }))
     const updated = get().clients.find((c) => c.id === clientId)
     if (updated) syncClient(updated)
+  },
+
+  subscribeToChanges: () => {
+    if (realtimeChannel) {
+      realtimeChannel.unsubscribe()
+      realtimeChannel = null
+    }
+    realtimeChannel = supabase
+      .channel('clients-realtime')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'clients' },
+        (payload) => {
+          if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
+            const c = (payload.new as { data: Client }).data
+            const derived: Client = {
+              ...c,
+              statusReceptivo: deriveStatusFromNumber(c.numeroReceptivo?.statusFinal ?? 'Não iniciado') as StatusReceptivo,
+              statusAtivo: deriveStatusFromNumber(c.numeroAtivo?.statusFinal ?? 'Não iniciado') as StatusAtivo,
+              statusDataCrazy: (c.dataCrazy?.status ?? 'Não iniciado') as StatusDataCrazy,
+            }
+            set((s) => {
+              const exists = s.clients.some((cl) => cl.id === derived.id)
+              return {
+                clients: exists
+                  ? s.clients.map((cl) => cl.id === derived.id ? derived : cl)
+                  : [...s.clients, derived],
+              }
+            })
+          } else if (payload.eventType === 'DELETE') {
+            const id = (payload.old as { id: string }).id
+            set((s) => ({ clients: s.clients.filter((c) => c.id !== id) }))
+          }
+        }
+      )
+      .subscribe()
+  },
+
+  unsubscribeFromChanges: () => {
+    if (realtimeChannel) {
+      realtimeChannel.unsubscribe()
+      realtimeChannel = null
+    }
   },
 }))

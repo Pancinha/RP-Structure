@@ -113,6 +113,32 @@ export function statusAutomacaoColor(s: StatusAutomacao): string {
   }
 }
 
+const PROGRESS_ORDER: Record<string, number> = {
+  'Aguardando dados/acesso': 0,
+  'Aguardando código Facebook': 1,
+  'Primeiro acesso realizado': 2,
+  'Aguardando 24h': 3,
+  'Criando BM receptiva': 4,
+  'BM receptiva em análise': 5,
+  'BM receptiva aprovada': 6,
+  'Configurando número receptivo': 7,
+  'Receptivo pronto': 8,
+  'Criando BM ativa': 9,
+  'BM ativa em análise': 10,
+  'BM ativa aprovada': 11,
+  'Configurando número ativo': 12,
+  'Configurando DataCrazy': 13,
+  'Configurando automações': 14,
+  'Cliente pronto': 15,
+  'Cliente com pendência': -1,
+  'Cliente pausado': -2,
+  'Cliente cancelado': -3,
+}
+
+export function progressScore(statusGeral: string): number {
+  return PROGRESS_ORDER[statusGeral] ?? 0
+}
+
 export function tipoHistoricoLabel(tipo: string): string {
   const map: Record<string, string> = {
     cadastro: 'Cadastro',
