@@ -153,7 +153,7 @@ export function LoginPage({ initialStep = 'credentials', onAuthenticated }: Prop
             <span className="text-white text-lg font-bold">RP</span>
           </div>
           <h1 className="text-xl font-bold text-gray-900">RP Structure</h1>
-          <p className="text-sm text-gray-500">Gestão de implantações — KSCJ</p>
+          <p className="text-sm text-gray-500">Gestão de implantações — KSJ</p>
         </div>
 
         <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
@@ -353,7 +353,7 @@ export function LoginPage({ initialStep = 'credentials', onAuthenticated }: Prop
         </div>
 
         <p className="text-center text-xs text-gray-400 mt-6">
-          Área restrita — KSCJ &copy; {new Date().getFullYear()}
+          Área restrita — KSJ &copy; {new Date().getFullYear()}
         </p>
       </div>
     </div>

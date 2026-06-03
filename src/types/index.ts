@@ -114,6 +114,45 @@ export interface FacebookData {
   observacoes: string
 }
 
+export type EtapaAquecimento =
+  | 'não_iniciado'
+  | 'template_criando'
+  | 'template_aguardando'
+  | 'template_aprovado'
+  | 'primeiro_disparo'
+  | 'aquecendo'
+  | 'aquecida'
+
+export interface BMTemplate {
+  id: string
+  nome: string
+  dataEnvio: string
+  dataAprovacao: string
+  status: 'criando' | 'aguardando' | 'aprovado' | 'recusado'
+  categoria: 'utility' | 'marketing' | 'authentication' | ''
+  observacoes: string
+}
+
+export interface Disparo {
+  id: string
+  data: string
+  nomeLista: string
+  arquivoLista: string
+  totalLeads: number
+  totalRespostas: number
+  qualidade: 'Boa' | 'Média' | 'Ruim' | ''
+  observacoes: string
+}
+
+export interface AquecimentoBM {
+  etapa: EtapaAquecimento
+  limiteAtual: number
+  dataInicio: string
+  templates: BMTemplate[]
+  disparos: Disparo[]
+  observacoes: string
+}
+
 export interface BMData {
   nome: string
   idBM: string
@@ -128,6 +167,7 @@ export interface BMData {
   motivoRecusa: string
   observacoes: string
   checklist: BMChecklist
+  aquecimento?: AquecimentoBM
 }
 
 export interface NumberData {
@@ -255,6 +295,15 @@ export const DEFAULT_FACEBOOK: FacebookData = {
   dataPrimeiroAcesso: '',
   segundoAcessoRealizado: false,
   dataSegundoAcesso: '',
+  observacoes: '',
+}
+
+export const DEFAULT_AQUECIMENTO: AquecimentoBM = {
+  etapa: 'não_iniciado',
+  limiteAtual: 250,
+  dataInicio: '',
+  templates: [],
+  disparos: [],
   observacoes: '',
 }
 
