@@ -1,11 +1,17 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Flame, ChevronRight, Zap, Users, MessageSquare, TrendingUp } from 'lucide-react'
+import { differenceInDays } from 'date-fns'
+import {
+  Flame, ChevronRight, Zap, Users, TrendingUp, BarChart2,
+  AlertTriangle, Clock, CheckCircle2, MessageSquare, Target,
+  ArrowRight, Search, ThumbsDown, Activity, Filter,
+} from 'lucide-react'
 import { useStore } from '../../store'
 import { Badge } from '../../components/ui/Badge'
 import { Card } from '../../components/ui/Card'
 import { DEFAULT_AQUECIMENTO } from '../../types'
-import type { EtapaAquecimento, BMData, AquecimentoBM } from '../../types'
+import type { EtapaAquecimento, BMData, AquecimentoBM, Disparo } from '../../types'
+import { formatDateShort } from '../../utils/format'
 
 interface BMRow {
   clientId: string
@@ -14,7 +20,13 @@ interface BMRow {
   bm: BMData
   aq: AquecimentoBM
 }
-import { formatDateShort } from '../../utils/format'
+
+interface EnrichedDisparo extends Disparo {
+  clientId: string
+  clientNome: string
+  tipo: 'receptiva' | 'ativa'
+  bmNome: string
+}
 
 const ETAPA_LABELS: Record<EtapaAquecimento, string> = {
   não_iniciado: 'Não iniciado',
@@ -26,152 +38,676 @@ const ETAPA_LABELS: Record<EtapaAquecimento, string> = {
   aquecida: 'Aquecida',
 }
 
+const ETAPA_ORDER: EtapaAquecimento[] = [
+  'não_iniciado', 'template_criando', 'template_aguardando',
+  'template_aprovado', 'primeiro_disparo', 'aquecendo', 'aquecida',
+]
+
 function etapaColor(e: EtapaAquecimento): string {
-  switch (e) {
-    case 'não_iniciado': return 'bg-gray-100 text-gray-600 border-gray-200'
-    case 'template_criando': return 'bg-yellow-100 text-yellow-800 border-yellow-200'
-    case 'template_aguardando': return 'bg-yellow-100 text-yellow-700 border-yellow-200'
-    case 'template_aprovado': return 'bg-blue-100 text-blue-800 border-blue-200'
-    case 'primeiro_disparo': return 'bg-purple-100 text-purple-800 border-purple-200'
-    case 'aquecendo': return 'bg-orange-100 text-orange-800 border-orange-200'
-    case 'aquecida': return 'bg-green-100 text-green-800 border-green-200'
+  const map: Record<EtapaAquecimento, string> = {
+    não_iniciado: 'bg-gray-100 text-gray-600 border-gray-200',
+    template_criando: 'bg-yellow-100 text-yellow-800 border-yellow-200',
+    template_aguardando: 'bg-amber-100 text-amber-800 border-amber-200',
+    template_aprovado: 'bg-blue-100 text-blue-800 border-blue-200',
+    primeiro_disparo: 'bg-purple-100 text-purple-800 border-purple-200',
+    aquecendo: 'bg-orange-100 text-orange-800 border-orange-200',
+    aquecida: 'bg-green-100 text-green-800 border-green-200',
   }
+  return map[e]
+}
+
+function etapaBgHex(e: EtapaAquecimento): string {
+  const map: Record<EtapaAquecimento, string> = {
+    não_iniciado: '#d1d5db',
+    template_criando: '#fde68a',
+    template_aguardando: '#fcd34d',
+    template_aprovado: '#93c5fd',
+    primeiro_disparo: '#c4b5fd',
+    aquecendo: '#fdba74',
+    aquecida: '#6ee7b7',
+  }
+  return map[e]
 }
 
 function qualidadeColor(q: string): string {
   if (q === 'Boa') return 'bg-green-100 text-green-800 border-green-200'
   if (q === 'Média') return 'bg-yellow-100 text-yellow-800 border-yellow-200'
   if (q === 'Ruim') return 'bg-red-100 text-red-800 border-red-200'
-  return 'bg-gray-100 text-gray-500 border-gray-200'
+  return 'bg-gray-100 text-gray-400 border-gray-200'
+}
+
+function qualidadeDot(q: string): string {
+  if (q === 'Boa') return 'bg-green-400'
+  if (q === 'Ruim') return 'bg-red-400'
+  if (q === 'Média') return 'bg-yellow-400'
+  return 'bg-gray-300'
+}
+
+function resolveAq(bm: BMData): AquecimentoBM {
+  return {
+    ...DEFAULT_AQUECIMENTO,
+    ...bm.aquecimento,
+    templates: bm.aquecimento?.templates ?? [],
+    disparos: bm.aquecimento?.disparos ?? [],
+  }
 }
 
 type TipoFilter = 'todos' | 'receptiva' | 'ativa'
 type EtapaFilter = 'todas' | EtapaAquecimento
 
-export function Aquecimento() {
-  const clients = useStore((s) => s.clients)
-  const navigate = useNavigate()
+// ── Chart: leads vs respostas bar chart ────────────────────
 
-  const [tipoFilter, setTipoFilter] = useState<TipoFilter>('todos')
-  const [etapaFilter, setEtapaFilter] = useState<EtapaFilter>('todas')
-  const [search, setSearch] = useState('')
-
-  // Build flat list of BM rows
-  const rows: BMRow[] = clients.flatMap((client) => {
-    const result: BMRow[] = []
-
-    const addRow = (tipo: 'receptiva' | 'ativa') => {
-      const bm = tipo === 'receptiva' ? client.bmReceptiva : client.bmAtiva
-      if (!bm.nome && bm.status === 'Não iniciada' && !bm.aquecimento) return
-      const aq: AquecimentoBM = { ...DEFAULT_AQUECIMENTO, ...bm.aquecimento, templates: bm.aquecimento?.templates ?? [], disparos: bm.aquecimento?.disparos ?? [] }
-      result.push({ clientId: client.id, clientNome: client.nomeConhecido || client.nome, tipo, bm, aq })
-    }
-
-    addRow('receptiva')
-    addRow('ativa')
-    return result
-  })
-
-  const filtered = rows.filter((r) => {
-    if (tipoFilter !== 'todos' && r.tipo !== tipoFilter) return false
-    if (etapaFilter !== 'todas' && r.aq.etapa !== etapaFilter) return false
-    if (search) {
-      const q = search.toLowerCase()
-      if (!r.clientNome.toLowerCase().includes(q) && !r.bm.nome.toLowerCase().includes(q)) return false
-    }
-    return true
-  })
-
-  // Global stats
-  const allDisparos = rows.flatMap((r) => r.aq.disparos)
-  const totalDisparos = allDisparos.length
-  const totalLeads = allDisparos.reduce((s, d) => s + (Number(d.totalLeads) || 0), 0)
-  const totalRespostas = allDisparos.reduce((s, d) => s + (Number(d.totalRespostas) || 0), 0)
-  const taxaMedia = totalLeads > 0 ? ((totalRespostas / totalLeads) * 100).toFixed(1) : '0'
-  const bmsAtivas = rows.filter((r) => r.aq.etapa !== 'não_iniciado').length
+function DisparosBarChart({
+  items,
+}: {
+  items: Array<{ leads: number; respostas: number; date: string; label: string }>
+}) {
+  if (items.length === 0) {
+    return (
+      <div className="h-28 flex flex-col items-center justify-center gap-2 text-sm text-gray-400">
+        <Zap size={20} className="text-gray-300" />
+        Nenhum disparo registrado ainda
+      </div>
+    )
+  }
+  const maxVal = Math.max(...items.flatMap((d) => [d.leads, d.respostas]), 1)
+  const H = 96
 
   return (
-    <div className="p-6 space-y-5">
-      <div className="flex items-center gap-2">
-        <Flame size={22} className="text-orange-500" />
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Aquecimento de BMs</h1>
-          <p className="text-sm text-gray-500 mt-0.5">Controle de templates, disparos e resultados por BM</p>
-        </div>
-      </div>
-
-      {/* Stats cards */}
-      <div className="grid grid-cols-2 xl:grid-cols-4 gap-4">
-        {[
-          { label: 'BMs em aquecimento', value: bmsAtivas, icon: <Flame size={18} />, bg: 'bg-orange-100', color: 'text-orange-600' },
-          { label: 'Total de disparos', value: totalDisparos, icon: <Zap size={18} />, bg: 'bg-purple-100', color: 'text-purple-600' },
-          { label: 'Leads atingidos', value: totalLeads.toLocaleString('pt-BR'), icon: <Users size={18} />, bg: 'bg-blue-100', color: 'text-blue-600' },
-          { label: 'Taxa de resposta', value: `${taxaMedia}%`, icon: <TrendingUp size={18} />, bg: 'bg-green-100', color: 'text-green-600' },
-        ].map((s) => (
-          <div key={s.label} className="bg-white rounded-xl border border-gray-200 shadow-sm p-4">
-            <div className="flex items-start justify-between gap-2">
-              <div>
-                <p className="text-xs text-gray-500 font-medium">{s.label}</p>
-                <p className="text-3xl font-bold text-gray-900 mt-1.5">{s.value}</p>
-              </div>
-              <div className={`${s.bg} ${s.color} p-2 rounded-lg flex-shrink-0 mt-0.5`}>{s.icon}</div>
-            </div>
+    <div>
+      <div className="flex items-end gap-1.5 h-24 pb-0">
+        {items.map((d, i) => (
+          <div
+            key={i}
+            className="flex-1 flex items-end gap-0.5 group cursor-default"
+            title={`${d.label}\nData: ${d.date}\nLeads: ${d.leads.toLocaleString('pt-BR')}\nRespostas: ${d.respostas.toLocaleString('pt-BR')}\nTaxa: ${d.leads > 0 ? ((d.respostas / d.leads) * 100).toFixed(1) : 0}%`}
+          >
+            <div
+              className="flex-1 bg-blue-400/75 rounded-t-sm group-hover:bg-blue-500 transition-colors"
+              style={{ height: `${Math.max((d.leads / maxVal) * H, 2)}px` }}
+            />
+            <div
+              className="flex-1 bg-emerald-400/75 rounded-t-sm group-hover:bg-emerald-500 transition-colors"
+              style={{ height: `${Math.max((d.respostas / maxVal) * H, 2)}px` }}
+            />
           </div>
         ))}
       </div>
+      <div className="mt-3 pt-3 border-t border-gray-100 flex items-center gap-5">
+        <div className="flex items-center gap-1.5">
+          <div className="w-3 h-3 rounded-sm bg-blue-400/75" />
+          <span className="text-xs text-gray-500">Leads enviados</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <div className="w-3 h-3 rounded-sm bg-emerald-400/75" />
+          <span className="text-xs text-gray-500">Respostas recebidas</span>
+        </div>
+        <span className="text-xs text-gray-400 ml-auto">
+          Passe o mouse para detalhes
+        </span>
+      </div>
+    </div>
+  )
+}
 
-      {/* Filters */}
-      <Card className="p-4">
-        <div className="flex flex-wrap items-center gap-3">
-          <input
-            type="text"
-            placeholder="Buscar cliente ou BM..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 min-w-48"
-          />
-          <select
-            value={tipoFilter}
-            onChange={(e) => setTipoFilter(e.target.value as TipoFilter)}
-            className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-          >
-            <option value="todos">Receptiva + Ativa</option>
-            <option value="receptiva">Só Receptiva</option>
-            <option value="ativa">Só Ativa</option>
-          </select>
-          <select
-            value={etapaFilter}
-            onChange={(e) => setEtapaFilter(e.target.value as EtapaFilter)}
-            className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-          >
-            <option value="todas">Todas as etapas</option>
-            {(Object.entries(ETAPA_LABELS) as [EtapaAquecimento, string][]).map(([v, l]) => (
-              <option key={v} value={v}>{l}</option>
-            ))}
-          </select>
-          <span className="text-xs text-gray-400 ml-auto">{filtered.length} BM(s)</span>
+// ── Chart: taxa de resposta trend line ──────────────────────
+
+function TaxaLineChart({
+  values,
+  labels,
+}: {
+  values: number[]
+  labels: string[]
+}) {
+  if (values.length < 2) {
+    return (
+      <div className="h-16 flex items-center justify-center text-xs text-gray-400">
+        Disparos insuficientes para exibir tendência (mínimo 2 com leads)
+      </div>
+    )
+  }
+  const max = Math.max(...values, 5)
+  const W = 400
+  const H = 64
+  const pts = values.map((v, i) => ({
+    x: values.length === 1 ? W / 2 : (i / (values.length - 1)) * W,
+    y: H - (v / max) * (H - 4) - 2,
+  }))
+  const lineStr = pts.map((p) => `${p.x},${p.y}`).join(' ')
+  const areaStr = `0,${H} ${lineStr} ${W},${H}`
+  const lastVal = values[values.length - 1]
+  const prevVal = values[values.length - 2]
+  const trend = lastVal - prevVal
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-xs text-gray-500">Taxa de resposta por disparo (%)</span>
+        <span className={`text-xs font-semibold flex items-center gap-1 ${trend >= 0 ? 'text-green-600' : 'text-red-500'}`}>
+          {trend >= 0 ? '↑' : '↓'} {Math.abs(trend).toFixed(1)}% no último disparo
+        </span>
+      </div>
+      <svg
+        width="100%"
+        height={H}
+        viewBox={`0 0 ${W} ${H}`}
+        preserveAspectRatio="none"
+        className="overflow-visible"
+      >
+        <defs>
+          <linearGradient id="taxa-area-grad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#f97316" stopOpacity="0.18" />
+            <stop offset="100%" stopColor="#f97316" stopOpacity="0.01" />
+          </linearGradient>
+        </defs>
+        <polygon points={areaStr} fill="url(#taxa-area-grad)" />
+        <polyline
+          points={lineStr}
+          fill="none"
+          stroke="#f97316"
+          strokeWidth="1.5"
+          strokeLinejoin="round"
+          strokeLinecap="round"
+        />
+        {pts.map((p, i) => (
+          <circle key={i} cx={p.x} cy={p.y} r="3" fill="white" stroke="#f97316" strokeWidth="1.5">
+            <title>{`${labels[i]}: ${values[i].toFixed(1)}%`}</title>
+          </circle>
+        ))}
+      </svg>
+    </div>
+  )
+}
+
+// ── Main component ─────────────────────────────────────────
+
+export function Aquecimento() {
+  const clients = useStore((s) => s.clients)
+  const navigate = useNavigate()
+  const [tipoFilter, setTipoFilter] = useState<TipoFilter>('todos')
+  const [etapaFilter, setEtapaFilter] = useState<EtapaFilter>('todas')
+  const [search, setSearch] = useState('')
+  const [pipelineFilter, setPipelineFilter] = useState<EtapaAquecimento | null>(null)
+
+  const rows: BMRow[] = useMemo(
+    () =>
+      clients.flatMap((client) => {
+        const result: BMRow[] = []
+        const add = (tipo: 'receptiva' | 'ativa') => {
+          const bm = tipo === 'receptiva' ? client.bmReceptiva : client.bmAtiva
+          const aq = resolveAq(bm)
+          if (!bm.nome && aq.etapa === 'não_iniciado' && aq.templates.length === 0 && aq.disparos.length === 0) return
+          result.push({ clientId: client.id, clientNome: client.nomeConhecido || client.nome, tipo, bm, aq })
+        }
+        add('receptiva')
+        add('ativa')
+        return result
+      }),
+    [clients]
+  )
+
+  const allDisparos: EnrichedDisparo[] = useMemo(
+    () =>
+      rows
+        .flatMap((r) =>
+          r.aq.disparos.map((d) => ({ ...d, clientId: r.clientId, clientNome: r.clientNome, tipo: r.tipo, bmNome: r.bm.nome }))
+        )
+        .sort((a, b) => b.data.localeCompare(a.data)),
+    [rows]
+  )
+
+  const stats = useMemo(() => {
+    const bmsAtivas = rows.filter((r) => r.aq.etapa !== 'não_iniciado').length
+    const bmsAquecidas = rows.filter((r) => r.aq.etapa === 'aquecida').length
+    const totalLeads = allDisparos.reduce((s, d) => s + (d.totalLeads || 0), 0)
+    const totalRespostas = allDisparos.reduce((s, d) => s + (d.totalRespostas || 0), 0)
+    const taxaMedia = totalLeads > 0 ? (totalRespostas / totalLeads) * 100 : 0
+    const templatesAprovados = rows.reduce((s, r) => s + r.aq.templates.filter((t) => t.status === 'aprovado').length, 0)
+    const templatesTotal = rows.reduce((s, r) => s + r.aq.templates.length, 0)
+    return { bmsAtivas, bmsAquecidas, totalLeads, totalRespostas, taxaMedia, templatesAprovados, templatesTotal }
+  }, [rows, allDisparos])
+
+  const pipelineCounts = useMemo(() => {
+    const counts = Object.fromEntries(ETAPA_ORDER.map((e) => [e, 0])) as Record<EtapaAquecimento, number>
+    rows.forEach((r) => { counts[r.aq.etapa]++ })
+    return counts
+  }, [rows])
+  const maxPipelineCount = Math.max(...Object.values(pipelineCounts), 1)
+
+  const pendencias = useMemo(() => {
+    const list: Array<{
+      type: 'recusado' | 'ruim' | 'inativo'
+      clientId: string
+      clientNome: string
+      tipo: 'receptiva' | 'ativa'
+      bmNome: string
+      detail: string
+    }> = []
+    rows.forEach((r) => {
+      r.aq.templates
+        .filter((t) => t.status === 'recusado')
+        .forEach((t) =>
+          list.push({ type: 'recusado', clientId: r.clientId, clientNome: r.clientNome, tipo: r.tipo, bmNome: r.bm.nome, detail: `Template "${t.nome}" foi recusado` })
+        )
+      const ordenados = [...r.aq.disparos].sort((a, b) => b.data.localeCompare(a.data))
+      if (ordenados[0]?.qualidade === 'Ruim') {
+        list.push({ type: 'ruim', clientId: r.clientId, clientNome: r.clientNome, tipo: r.tipo, bmNome: r.bm.nome, detail: `Último disparo com qualidade Ruim (${formatDateShort(ordenados[0].data)})` })
+      }
+      const emDisparo = !['não_iniciado', 'template_criando', 'template_aguardando'].includes(r.aq.etapa)
+      if (emDisparo) {
+        const ultimo = ordenados[0]
+        const ref = ultimo?.data || r.aq.dataInicio
+        if (ref) {
+          const dias = differenceInDays(new Date(), new Date(ref))
+          if (dias >= 7)
+            list.push({ type: 'inativo', clientId: r.clientId, clientNome: r.clientNome, tipo: r.tipo, bmNome: r.bm.nome, detail: `${dias} dias desde o último disparo` })
+        }
+      }
+    })
+    return list
+  }, [rows])
+
+  const chartDisparos = useMemo(
+    () =>
+      allDisparos
+        .slice(0, 20)
+        .reverse()
+        .map((d) => ({
+          leads: d.totalLeads || 0,
+          respostas: d.totalRespostas || 0,
+          date: formatDateShort(d.data),
+          label: `${d.clientNome} · ${d.tipo === 'receptiva' ? 'Receptiva' : 'Ativa'}`,
+        })),
+    [allDisparos]
+  )
+
+  const taxaTrendData = useMemo(() => {
+    const eligible = allDisparos.filter((d) => (d.totalLeads || 0) > 0).reverse().slice(-15)
+    return {
+      values: eligible.map((d) => ((d.totalRespostas || 0) / (d.totalLeads || 1)) * 100),
+      labels: eligible.map((d) => `${formatDateShort(d.data)} · ${d.clientNome}`),
+    }
+  }, [allDisparos])
+
+  const bmRanking = useMemo(
+    () =>
+      rows
+        .filter((r) => r.aq.disparos.length > 0)
+        .map((r) => {
+          const tl = r.aq.disparos.reduce((s, d) => s + (d.totalLeads || 0), 0)
+          const tr = r.aq.disparos.reduce((s, d) => s + (d.totalRespostas || 0), 0)
+          const taxa = tl > 0 ? (tr / tl) * 100 : 0
+          return { clientId: r.clientId, clientNome: r.clientNome, tipo: r.tipo, bmNome: r.bm.nome, taxa, tl, etapa: r.aq.etapa }
+        })
+        .sort((a, b) => b.taxa - a.taxa)
+        .slice(0, 8),
+    [rows]
+  )
+
+  const filtered = useMemo(
+    () =>
+      rows.filter((r) => {
+        if (tipoFilter !== 'todos' && r.tipo !== tipoFilter) return false
+        if (pipelineFilter && r.aq.etapa !== pipelineFilter) return false
+        if (!pipelineFilter && etapaFilter !== 'todas' && r.aq.etapa !== etapaFilter) return false
+        if (search) {
+          const q = search.toLowerCase()
+          if (!r.clientNome.toLowerCase().includes(q) && !r.bm.nome.toLowerCase().includes(q)) return false
+        }
+        return true
+      }),
+    [rows, tipoFilter, etapaFilter, pipelineFilter, search]
+  )
+
+  return (
+    <div className="p-6 space-y-5">
+
+      {/* ── Header ──────────────────────────────────────── */}
+      <div className="flex items-start justify-between">
+        <div className="flex items-center gap-2.5">
+          <div className="p-2 bg-orange-100 rounded-xl">
+            <Flame size={20} className="text-orange-500" />
+          </div>
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900">Aquecimento de BMs</h1>
+            <p className="text-sm text-gray-500 mt-0.5">
+              Gestão completa de templates, disparos e performance
+            </p>
+          </div>
+        </div>
+        {allDisparos[0] && (
+          <div className="text-right">
+            <p className="text-xs text-gray-400">Último disparo</p>
+            <p className="text-sm font-medium text-gray-700">{allDisparos[0].clientNome}</p>
+            <p className="text-xs text-gray-500">{formatDateShort(allDisparos[0].data)}</p>
+          </div>
+        )}
+      </div>
+
+      {/* ── Stats row ───────────────────────────────────── */}
+      <div className="grid grid-cols-2 xl:grid-cols-4 gap-4">
+        <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4">
+          <div className="flex items-start justify-between gap-2">
+            <div>
+              <p className="text-xs text-gray-500 font-medium">BMs em aquecimento</p>
+              <p className="text-3xl font-bold text-gray-900 mt-1">{stats.bmsAtivas}</p>
+              <p className="text-xs text-gray-400 mt-0.5">{stats.bmsAquecidas} já aquecidas</p>
+            </div>
+            <div className="bg-orange-100 text-orange-600 p-2 rounded-lg flex-shrink-0">
+              <Flame size={18} />
+            </div>
+          </div>
+          <div className="mt-3 w-full bg-orange-100 rounded-full h-1.5">
+            <div
+              className="bg-orange-400 h-1.5 rounded-full"
+              style={{ width: `${stats.bmsAtivas > 0 ? (stats.bmsAquecidas / stats.bmsAtivas) * 100 : 0}%` }}
+            />
+          </div>
+        </div>
+        <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4">
+          <div className="flex items-start justify-between gap-2">
+            <div>
+              <p className="text-xs text-gray-500 font-medium">Total de leads</p>
+              <p className="text-3xl font-bold text-gray-900 mt-1">{stats.totalLeads.toLocaleString('pt-BR')}</p>
+              <p className="text-xs text-gray-400 mt-0.5">{allDisparos.length} disparos realizados</p>
+            </div>
+            <div className="bg-blue-100 text-blue-600 p-2 rounded-lg flex-shrink-0">
+              <Users size={18} />
+            </div>
+          </div>
+        </div>
+        <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4">
+          <div className="flex items-start justify-between gap-2">
+            <div>
+              <p className="text-xs text-gray-500 font-medium">Taxa média de resposta</p>
+              <p className={`text-3xl font-bold mt-1 ${stats.taxaMedia >= 10 ? 'text-green-700' : stats.taxaMedia >= 5 ? 'text-yellow-700' : 'text-gray-900'}`}>
+                {stats.taxaMedia.toFixed(1)}%
+              </p>
+              <p className="text-xs text-gray-400 mt-0.5">{stats.totalRespostas.toLocaleString('pt-BR')} respostas totais</p>
+            </div>
+            <div className={`p-2 rounded-lg flex-shrink-0 ${stats.taxaMedia >= 10 ? 'bg-green-100 text-green-600' : 'bg-yellow-100 text-yellow-600'}`}>
+              <TrendingUp size={18} />
+            </div>
+          </div>
+        </div>
+        <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4">
+          <div className="flex items-start justify-between gap-2">
+            <div>
+              <p className="text-xs text-gray-500 font-medium">Templates</p>
+              <p className="text-3xl font-bold text-gray-900 mt-1">
+                {stats.templatesAprovados}
+                <span className="text-lg text-gray-400 font-normal">/{stats.templatesTotal}</span>
+              </p>
+              <p className="text-xs text-gray-400 mt-0.5">aprovados de criados</p>
+            </div>
+            <div className="bg-purple-100 text-purple-600 p-2 rounded-lg flex-shrink-0">
+              <CheckCircle2 size={18} />
+            </div>
+          </div>
+          {stats.templatesTotal > 0 && (
+            <div className="mt-3 w-full bg-purple-100 rounded-full h-1.5">
+              <div
+                className="bg-purple-400 h-1.5 rounded-full"
+                style={{ width: `${(stats.templatesAprovados / stats.templatesTotal) * 100}%` }}
+              />
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ── Pipeline funil ──────────────────────────────── */}
+      <Card className="p-5">
+        <div className="flex items-center gap-2 mb-4">
+          <Target size={15} className="text-gray-400" />
+          <h2 className="text-sm font-semibold text-gray-700">Funil de aquecimento</h2>
+          <span className="text-xs text-gray-400">— clique em uma etapa para filtrar a tabela</span>
+          {pipelineFilter && (
+            <button
+              onClick={() => setPipelineFilter(null)}
+              className="ml-auto text-xs text-blue-600 hover:text-blue-800 font-medium"
+            >
+              ✕ Limpar filtro
+            </button>
+          )}
+        </div>
+        <div className="grid grid-cols-7 gap-2">
+          {ETAPA_ORDER.map((etapa) => {
+            const count = pipelineCounts[etapa]
+            const isActive = pipelineFilter === etapa
+            const barH = count > 0 ? Math.max((count / maxPipelineCount) * 48, 4) : 0
+            return (
+              <button
+                key={etapa}
+                onClick={() => setPipelineFilter(isActive ? null : etapa)}
+                className={`flex flex-col items-center gap-1.5 p-2 rounded-xl border-2 transition-all cursor-pointer ${
+                  isActive
+                    ? 'border-blue-400 bg-blue-50 shadow-sm'
+                    : 'border-transparent hover:border-gray-200 hover:bg-gray-50'
+                }`}
+              >
+                <div className="w-full h-12 flex items-end justify-center">
+                  {count > 0 ? (
+                    <div
+                      className="w-full rounded-t-md transition-all"
+                      style={{ height: `${barH}px`, backgroundColor: etapaBgHex(etapa) }}
+                    />
+                  ) : (
+                    <div className="w-full h-0.5 bg-gray-100 rounded" />
+                  )}
+                </div>
+                <span className={`text-2xl font-bold leading-none ${count > 0 ? 'text-gray-900' : 'text-gray-300'}`}>
+                  {count}
+                </span>
+                <span className="text-[9px] text-gray-500 text-center leading-tight px-0.5">
+                  {ETAPA_LABELS[etapa]}
+                </span>
+              </button>
+            )
+          })}
+        </div>
+        <div className="mt-3 flex items-center justify-center gap-1.5">
+          {ETAPA_ORDER.map((etapa, i) => (
+            <span key={etapa} className="flex items-center gap-1">
+              <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: etapaBgHex(etapa) }} />
+              {i < ETAPA_ORDER.length - 1 && <ArrowRight size={9} className="text-gray-300 flex-shrink-0" />}
+            </span>
+          ))}
         </div>
       </Card>
 
-      {/* Table */}
+      {/* ── Charts row ──────────────────────────────────── */}
+      <div className="grid grid-cols-3 gap-4">
+        <Card className="col-span-2 p-5">
+          <div className="flex items-center gap-2 mb-4">
+            <BarChart2 size={15} className="text-gray-400" />
+            <h2 className="text-sm font-semibold text-gray-700">Histórico de disparos</h2>
+            <span className="text-xs text-gray-400">
+              {chartDisparos.length > 0 ? `últimos ${chartDisparos.length}` : ''}
+            </span>
+          </div>
+          <DisparosBarChart items={chartDisparos} />
+        </Card>
+
+        <Card className="p-5">
+          <div className="flex items-center gap-2 mb-4">
+            <TrendingUp size={15} className="text-gray-400" />
+            <h2 className="text-sm font-semibold text-gray-700">Ranking de resposta</h2>
+          </div>
+          {bmRanking.length === 0 ? (
+            <div className="py-6 flex flex-col items-center gap-2 text-gray-400">
+              <BarChart2 size={20} className="text-gray-300" />
+              <p className="text-xs text-center">Sem dados de disparo para comparar</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {bmRanking.map((bm) => (
+                <button
+                  key={`${bm.clientId}-${bm.tipo}`}
+                  onClick={() => navigate(`/clientes/${bm.clientId}?tab=${bm.tipo === 'receptiva' ? 'bm-receptiva' : 'bm-ativa'}`)}
+                  className="w-full text-left group"
+                >
+                  <div className="flex items-center justify-between text-xs mb-1">
+                    <span className="text-gray-700 truncate flex-1 group-hover:text-blue-700 transition-colors">
+                      {bm.clientNome}
+                      <span className="text-gray-400 ml-1">
+                        ({bm.tipo === 'receptiva' ? 'Rec' : 'Ati'})
+                      </span>
+                    </span>
+                    <span className={`font-bold ml-2 ${bm.taxa >= 10 ? 'text-green-700' : bm.taxa >= 5 ? 'text-yellow-700' : 'text-red-500'}`}>
+                      {bm.taxa.toFixed(1)}%
+                    </span>
+                  </div>
+                  <div className="w-full bg-gray-100 rounded-full h-1.5">
+                    <div
+                      className={`h-1.5 rounded-full transition-all ${bm.taxa >= 10 ? 'bg-green-500' : bm.taxa >= 5 ? 'bg-yellow-500' : 'bg-red-400'}`}
+                      style={{ width: `${Math.min(bm.taxa * 4, 100)}%` }}
+                    />
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </Card>
+      </div>
+
+      {/* ── Tendência (line chart) ───────────────────────── */}
+      {taxaTrendData.values.length >= 2 && (
+        <Card className="p-5">
+          <div className="flex items-center gap-2 mb-4">
+            <Activity size={15} className="text-gray-400" />
+            <h2 className="text-sm font-semibold text-gray-700">Tendência da taxa de resposta</h2>
+            <span className="text-xs text-gray-400">por disparo, todos os clientes</span>
+          </div>
+          <TaxaLineChart values={taxaTrendData.values} labels={taxaTrendData.labels} />
+        </Card>
+      )}
+
+      {/* ── Pendências ──────────────────────────────────── */}
+      {pendencias.length > 0 && (
+        <Card className="p-5 border-orange-200">
+          <div className="flex items-center gap-2 mb-4">
+            <AlertTriangle size={15} className="text-orange-500" />
+            <h2 className="text-sm font-semibold text-orange-800">
+              Pendências e alertas
+            </h2>
+            <span className="bg-orange-100 text-orange-700 text-xs px-2 py-0.5 rounded-full font-medium">
+              {pendencias.length}
+            </span>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
+            {pendencias.map((p, i) => (
+              <button
+                key={i}
+                onClick={() =>
+                  navigate(`/clientes/${p.clientId}?tab=${p.tipo === 'receptiva' ? 'bm-receptiva' : 'bm-ativa'}`)
+                }
+                className={`flex items-start gap-2.5 p-3 rounded-lg border text-left hover:shadow-sm transition-all ${
+                  p.type === 'recusado'
+                    ? 'bg-red-50 border-red-200 hover:border-red-300'
+                    : p.type === 'ruim'
+                    ? 'bg-amber-50 border-amber-200 hover:border-amber-300'
+                    : 'bg-yellow-50 border-yellow-200 hover:border-yellow-300'
+                }`}
+              >
+                {p.type === 'recusado' ? (
+                  <AlertTriangle size={14} className="text-red-500 flex-shrink-0 mt-0.5" />
+                ) : p.type === 'ruim' ? (
+                  <ThumbsDown size={14} className="text-amber-500 flex-shrink-0 mt-0.5" />
+                ) : (
+                  <Clock size={14} className="text-yellow-600 flex-shrink-0 mt-0.5" />
+                )}
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-semibold text-gray-800">{p.clientNome}</p>
+                  <p className="text-xs text-gray-500">
+                    {p.bmNome ? `${p.bmNome} · ` : ''}
+                    {p.tipo === 'receptiva' ? 'BM Receptiva' : 'BM Ativa'}
+                  </p>
+                  <p className="text-xs text-gray-600 mt-0.5">{p.detail}</p>
+                </div>
+                <ChevronRight size={12} className="text-gray-300 flex-shrink-0 ml-auto mt-0.5" />
+              </button>
+            ))}
+          </div>
+        </Card>
+      )}
+
+      {/* ── Filtros + Tabela ─────────────────────────────── */}
       <Card>
+        <div className="p-4 border-b border-gray-100">
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="relative">
+              <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+              <input
+                type="text"
+                placeholder="Buscar cliente ou BM..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="border border-gray-300 rounded-lg pl-8 pr-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 min-w-48"
+              />
+            </div>
+            <div className="flex items-center gap-1.5 text-gray-400">
+              <Filter size={13} />
+            </div>
+            <select
+              value={tipoFilter}
+              onChange={(e) => setTipoFilter(e.target.value as TipoFilter)}
+              className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="todos">Receptiva + Ativa</option>
+              <option value="receptiva">Só Receptiva</option>
+              <option value="ativa">Só Ativa</option>
+            </select>
+            {!pipelineFilter && (
+              <select
+                value={etapaFilter}
+                onChange={(e) => setEtapaFilter(e.target.value as EtapaFilter)}
+                className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="todas">Todas as etapas</option>
+                {ETAPA_ORDER.map((e) => (
+                  <option key={e} value={e}>
+                    {ETAPA_LABELS[e]}
+                  </option>
+                ))}
+              </select>
+            )}
+            {pipelineFilter && (
+              <div className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 border border-blue-200 rounded-lg">
+                <span className="text-sm text-blue-700">Etapa: {ETAPA_LABELS[pipelineFilter]}</span>
+                <button onClick={() => setPipelineFilter(null)} className="text-blue-400 hover:text-blue-700 ml-1 font-bold">
+                  ×
+                </button>
+              </div>
+            )}
+            <span className="text-xs text-gray-400 ml-auto">{filtered.length} BM(s)</span>
+          </div>
+        </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-gray-100 bg-gray-50/60">
-                {['Cliente', 'Tipo', 'Nome BM', 'Etapa', 'Templates', 'Disparos', 'Leads', 'Respostas', 'Última qualidade', 'Limite', 'Último disparo', ''].map((h) => (
-                  <th key={h} className="text-left px-4 py-2.5 text-xs font-semibold text-gray-400 uppercase tracking-wide whitespace-nowrap">{h}</th>
+              <tr className="bg-gray-50/60 border-b border-gray-100">
+                {[
+                  'Cliente', 'Tipo', 'Nome BM', 'Etapa', 'Templates', 'Disparos',
+                  'Leads', 'Respostas', 'Taxa', 'Últ. qualidade', 'Limite', 'Últ. disparo', '',
+                ].map((h) => (
+                  <th
+                    key={h}
+                    className="text-left px-4 py-2.5 text-xs font-semibold text-gray-400 uppercase tracking-wide whitespace-nowrap"
+                  >
+                    {h}
+                  </th>
                 ))}
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50">
               {filtered.map((r, i) => {
-                const disparosOrdered = [...r.aq.disparos].sort((a, b) => b.data.localeCompare(a.data))
-                const ultimoDisparo = disparosOrdered[0]
-                const totalLeadsRow = r.aq.disparos.reduce((s, d) => s + (d.totalLeads || 0), 0)
-                const totalRespostasRow = r.aq.disparos.reduce((s, d) => s + (d.totalRespostas || 0), 0)
+                const disparosOrdenados = [...r.aq.disparos].sort((a, b) => b.data.localeCompare(a.data))
+                const ultimoDisparo = disparosOrdenados[0]
+                const tl = r.aq.disparos.reduce((s, d) => s + (d.totalLeads || 0), 0)
+                const tr2 = r.aq.disparos.reduce((s, d) => s + (d.totalRespostas || 0), 0)
+                const taxa = tl > 0 ? (tr2 / tl) * 100 : 0
+                const templAprov = r.aq.templates.filter((t) => t.status === 'aprovado').length
                 const tab = r.tipo === 'receptiva' ? 'bm-receptiva' : 'bm-ativa'
-
                 return (
                   <tr
                     key={`${r.clientId}-${r.tipo}-${i}`}
@@ -185,26 +721,33 @@ export function Aquecimento() {
                         className={r.tipo === 'receptiva' ? 'bg-blue-100 text-blue-800 border-blue-200' : 'bg-purple-100 text-purple-800 border-purple-200'}
                       />
                     </td>
-                    <td className="px-4 py-3 text-gray-700 max-w-32 truncate" title={r.bm.nome}>{r.bm.nome || '—'}</td>
+                    <td className="px-4 py-3 text-gray-700 max-w-[140px] truncate" title={r.bm.nome}>
+                      {r.bm.nome || '—'}
+                    </td>
                     <td className="px-4 py-3">
                       <Badge label={ETAPA_LABELS[r.aq.etapa]} className={etapaColor(r.aq.etapa)} />
                     </td>
-                    <td className="px-4 py-3 text-center text-gray-700">{r.aq.templates.length}</td>
+                    <td className="px-4 py-3 text-center">
+                      <span className={templAprov > 0 ? 'text-green-700 font-semibold' : 'text-gray-500'}>
+                        {templAprov}/{r.aq.templates.length}
+                      </span>
+                    </td>
                     <td className="px-4 py-3 text-center text-gray-700">{r.aq.disparos.length}</td>
-                    <td className="px-4 py-3 text-gray-700">{totalLeadsRow.toLocaleString('pt-BR')}</td>
-                    <td className="px-4 py-3 text-gray-700">
-                      {totalRespostasRow.toLocaleString('pt-BR')}
-                      {totalLeadsRow > 0 && (
-                        <span className="text-xs text-gray-400 ml-1">
-                          ({((totalRespostasRow / totalLeadsRow) * 100).toFixed(0)}%)
-                        </span>
-                      )}
+                    <td className="px-4 py-3 text-gray-700">{tl.toLocaleString('pt-BR')}</td>
+                    <td className="px-4 py-3 text-gray-700">{tr2.toLocaleString('pt-BR')}</td>
+                    <td className="px-4 py-3">
+                      <span
+                        className={`font-semibold ${taxa >= 10 ? 'text-green-700' : taxa >= 5 ? 'text-yellow-700' : taxa > 0 ? 'text-red-600' : 'text-gray-300'}`}
+                      >
+                        {tl > 0 ? `${taxa.toFixed(1)}%` : '—'}
+                      </span>
                     </td>
                     <td className="px-4 py-3">
-                      {ultimoDisparo?.qualidade
-                        ? <Badge label={ultimoDisparo.qualidade} className={qualidadeColor(ultimoDisparo.qualidade)} />
-                        : <span className="text-xs text-gray-300">—</span>
-                      }
+                      {ultimoDisparo?.qualidade ? (
+                        <Badge label={ultimoDisparo.qualidade} className={qualidadeColor(ultimoDisparo.qualidade)} />
+                      ) : (
+                        <span className="text-xs text-gray-300">—</span>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-gray-700">
                       {r.aq.limiteAtual > 0 ? r.aq.limiteAtual.toLocaleString('pt-BR') : '—'}
@@ -220,9 +763,9 @@ export function Aquecimento() {
               })}
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={12} className="px-4 py-10 text-center text-gray-400 text-sm">
+                  <td colSpan={13} className="px-4 py-12 text-center text-gray-400 text-sm">
                     {rows.length === 0
-                      ? 'Nenhuma BM com dados de aquecimento. Acesse um cliente e configure a seção Aquecimento.'
+                      ? 'Nenhuma BM com dados de aquecimento. Acesse um cliente e configure a seção Aquecimento na aba BM.'
                       : 'Nenhuma BM corresponde aos filtros selecionados.'}
                   </td>
                 </tr>
@@ -230,57 +773,80 @@ export function Aquecimento() {
             </tbody>
           </table>
         </div>
-
-        {/* Legend */}
-        <div className="px-4 py-3 border-t border-gray-100 flex items-center gap-1 flex-wrap">
-          {(Object.entries(ETAPA_LABELS) as [EtapaAquecimento, string][]).map(([v, l]) => (
-            <span key={v} className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs border ${etapaColor(v)}`}>{l}</span>
-          ))}
-        </div>
       </Card>
 
-      {/* Disparos recentes */}
+      {/* ── Cronograma de atividades ─────────────────────── */}
       {allDisparos.length > 0 && (
-        <Card className="p-4">
-          <div className="flex items-center gap-2 mb-3">
+        <Card className="p-5">
+          <div className="flex items-center gap-2 mb-5">
             <MessageSquare size={15} className="text-gray-400" />
-            <h2 className="text-sm font-semibold text-gray-700">Últimos disparos registrados</h2>
+            <h2 className="text-sm font-semibold text-gray-700">Cronograma de atividades</h2>
+            <span className="text-xs text-gray-400">últimos disparos registrados</span>
           </div>
-          <div className="space-y-2">
-            {rows
-              .flatMap((r) =>
-                r.aq.disparos.map((d) => ({
-                  id: d.id, data: d.data, nomeLista: d.nomeLista, arquivoLista: d.arquivoLista,
-                  totalLeads: d.totalLeads, totalRespostas: d.totalRespostas, qualidade: d.qualidade,
-                  observacoes: d.observacoes,
-                  clientNome: r.clientNome, clientId: r.clientId, tipo: r.tipo, nomeBM: r.bm.nome,
-                }))
-              )
-              .sort((a, b) => b.data.localeCompare(a.data))
-              .slice(0, 8)
-              .map((d) => (
-                <div
-                  key={d.id}
-                  onClick={() => navigate(`/clientes/${d.clientId}?tab=${d.tipo === 'receptiva' ? 'bm-receptiva' : 'bm-ativa'}`)}
-                  className="flex items-center gap-3 p-3 bg-gray-50 hover:bg-gray-100 rounded-lg cursor-pointer transition-colors"
-                >
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <p className="text-sm font-medium text-gray-900">{d.clientNome}</p>
-                      {d.nomeBM && <span className="text-xs text-gray-400">· {d.nomeBM}</span>}
-                      <span className="text-xs text-gray-400">{formatDateShort(d.data)}</span>
-                      {d.qualidade && <Badge label={d.qualidade} className={qualidadeColor(d.qualidade)} />}
+          <div className="relative">
+            <div className="absolute left-[7px] top-1 bottom-1 w-px bg-gray-200" />
+            <div className="space-y-3">
+              {allDisparos.slice(0, 15).map((d) => (
+                <div key={d.id} className="pl-7 relative">
+                  <div
+                    className={`absolute left-0 top-2 w-3.5 h-3.5 rounded-full border-2 border-white shadow-sm ${qualidadeDot(d.qualidade)}`}
+                  />
+                  <button
+                    onClick={() =>
+                      navigate(`/clientes/${d.clientId}?tab=${d.tipo === 'receptiva' ? 'bm-receptiva' : 'bm-ativa'}`)
+                    }
+                    className="w-full text-left p-3 bg-gray-50 hover:bg-gray-100 rounded-lg transition-colors group"
+                  >
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="text-sm font-semibold text-gray-900 group-hover:text-blue-700 transition-colors">
+                          {d.clientNome}
+                        </span>
+                        <Badge
+                          label={d.tipo === 'receptiva' ? 'Receptiva' : 'Ativa'}
+                          className={d.tipo === 'receptiva' ? 'bg-blue-100 text-blue-700 border-blue-200' : 'bg-purple-100 text-purple-700 border-purple-200'}
+                        />
+                        {d.bmNome && <span className="text-xs text-gray-400 truncate">{d.bmNome}</span>}
+                      </div>
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        <span className="text-xs text-gray-400">{formatDateShort(d.data)}</span>
+                        {d.qualidade && (
+                          <Badge label={d.qualidade} className={qualidadeColor(d.qualidade)} />
+                        )}
+                        <ChevronRight size={12} className="text-gray-300 group-hover:text-gray-500" />
+                      </div>
                     </div>
-                    <p className="text-xs text-gray-600 mt-0.5">
-                      {d.nomeLista} · <span className="font-medium">{d.totalLeads.toLocaleString('pt-BR')}</span> leads
-                      {' → '}
-                      <span className="font-medium">{d.totalRespostas.toLocaleString('pt-BR')}</span> respostas
-                      {d.totalLeads > 0 && ` (${((d.totalRespostas / d.totalLeads) * 100).toFixed(1)}%)`}
-                    </p>
-                  </div>
-                  <ChevronRight size={14} className="text-gray-300 flex-shrink-0" />
+                    <div className="flex items-center gap-3 mt-1.5 flex-wrap">
+                      {d.nomeLista && (
+                        <span className="text-xs text-gray-500 font-medium">{d.nomeLista}</span>
+                      )}
+                      <span className="text-xs text-gray-500">
+                        <span className="font-semibold text-blue-700">
+                          {(d.totalLeads || 0).toLocaleString('pt-BR')}
+                        </span>{' '}
+                        leads
+                        {' → '}
+                        <span className="font-semibold text-emerald-700">
+                          {(d.totalRespostas || 0).toLocaleString('pt-BR')}
+                        </span>{' '}
+                        respostas
+                        {(d.totalLeads || 0) > 0 && (
+                          <span className="text-gray-400 ml-1">
+                            ({(((d.totalRespostas || 0) / (d.totalLeads || 1)) * 100).toFixed(1)}%)
+                          </span>
+                        )}
+                      </span>
+                      {d.arquivoLista && (
+                        <span className="text-xs text-gray-400">📄 {d.arquivoLista}</span>
+                      )}
+                    </div>
+                    {d.observacoes && (
+                      <p className="text-xs text-gray-500 mt-1 italic">{d.observacoes}</p>
+                    )}
+                  </button>
                 </div>
               ))}
+            </div>
           </div>
         </Card>
       )}
