@@ -543,7 +543,7 @@ export function Aquecimento() {
               {bmRanking.map((bm) => (
                 <button
                   key={`${bm.clientId}-${bm.tipo}`}
-                  onClick={() => navigate(`/clientes/${bm.clientId}?tab=${bm.tipo === 'receptiva' ? 'bm-receptiva' : 'bm-ativa'}`)}
+                  onClick={() => navigate(`/aquecimento/${bm.clientId}`)}
                   className="w-full text-left group"
                 >
                   <div className="flex items-center justify-between text-xs mb-1">
@@ -599,7 +599,7 @@ export function Aquecimento() {
               <button
                 key={i}
                 onClick={() =>
-                  navigate(`/clientes/${p.clientId}?tab=${p.tipo === 'receptiva' ? 'bm-receptiva' : 'bm-ativa'}`)
+                  navigate(`/aquecimento/${p.clientId}`)
                 }
                 className={`flex items-start gap-2.5 p-3 rounded-lg border text-left hover:shadow-sm transition-all ${
                   p.type === 'recusado'
@@ -707,11 +707,10 @@ export function Aquecimento() {
                 const tr2 = r.aq.disparos.reduce((s, d) => s + (d.totalRespostas || 0), 0)
                 const taxa = tl > 0 ? (tr2 / tl) * 100 : 0
                 const templAprov = r.aq.templates.filter((t) => t.status === 'aprovado').length
-                const tab = r.tipo === 'receptiva' ? 'bm-receptiva' : 'bm-ativa'
                 return (
                   <tr
                     key={`${r.clientId}-${r.tipo}-${i}`}
-                    onClick={() => navigate(`/clientes/${r.clientId}?tab=${tab}`)}
+                    onClick={() => navigate(`/aquecimento/${r.clientId}`)}
                     className="hover:bg-gray-50/80 transition-colors cursor-pointer"
                   >
                     <td className="px-4 py-3 font-medium text-gray-900 whitespace-nowrap">{r.clientNome}</td>
@@ -792,9 +791,7 @@ export function Aquecimento() {
                     className={`absolute left-0 top-2 w-3.5 h-3.5 rounded-full border-2 border-white shadow-sm ${qualidadeDot(d.qualidade)}`}
                   />
                   <button
-                    onClick={() =>
-                      navigate(`/clientes/${d.clientId}?tab=${d.tipo === 'receptiva' ? 'bm-receptiva' : 'bm-ativa'}`)
-                    }
+                    onClick={() => navigate(`/aquecimento/${d.clientId}`)}
                     className="w-full text-left p-3 bg-gray-50 hover:bg-gray-100 rounded-lg transition-colors group"
                   >
                     <div className="flex items-center justify-between gap-2 flex-wrap">

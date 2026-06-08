@@ -39,6 +39,7 @@ import { Automations } from './pages/Automations'
 import { Pendencias } from './pages/Pendencias'
 import { Settings } from './pages/Settings'
 import { Aquecimento } from './pages/Aquecimento'
+import { ClienteAquecimento } from './pages/Aquecimento/ClienteAquecimento'
 
 function LoadingScreen() {
   return (
@@ -153,6 +154,7 @@ export default function App() {
             <Route path="tarefas" element={<Tasks />} />
             <Route path="bms" element={<BMs />} />
             <Route path="aquecimento" element={<Aquecimento />} />
+            <Route path="aquecimento/:clientId" element={<ClienteAquecimento />} />
             <Route path="numeros" element={<Numbers />} />
             <Route path="automacoes" element={<Automations />} />
             <Route path="pendencias" element={<Pendencias />} />

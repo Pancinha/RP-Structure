@@ -144,12 +144,35 @@ export interface Disparo {
   observacoes: string
 }
 
+export interface ListaAquecimento {
+  id: string
+  nome: string
+  arquivo: string
+  urlExterno: string
+  tipo: 'csv' | 'xlsx' | 'pdf' | 'outro'
+  totalContatos: number
+  dataAdicionada: string
+  observacoes: string
+}
+
+export interface DisparoAgendado {
+  id: string
+  dataPlanejada: string
+  nomeLista: string
+  listaId: string
+  leadsPlanificados: number
+  observacoes: string
+  status: 'planejado' | 'realizado' | 'cancelado'
+}
+
 export interface AquecimentoBM {
   etapa: EtapaAquecimento
   limiteAtual: number
   dataInicio: string
   templates: BMTemplate[]
   disparos: Disparo[]
+  listas: ListaAquecimento[]
+  cronograma: DisparoAgendado[]
   observacoes: string
 }
 
@@ -304,6 +327,8 @@ export const DEFAULT_AQUECIMENTO: AquecimentoBM = {
   dataInicio: '',
   templates: [],
   disparos: [],
+  listas: [],
+  cronograma: [],
   observacoes: '',
 }
 
