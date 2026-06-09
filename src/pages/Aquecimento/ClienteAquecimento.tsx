@@ -191,10 +191,9 @@ export function ClienteAquecimento() {
 
   useEffect(() => {
     if (!client) { navigate('/aquecimento'); return }
-    setFormR({ ...client.bmReceptiva, aquecimento: resolveAq(client.bmReceptiva) })
-    setFormA({ ...client.bmAtiva, aquecimento: resolveAq(client.bmAtiva) })
-    setDirtyR(false)
-    setDirtyA(false)
+    // Only reset if not dirty — avoids overwriting unsaved config changes
+    if (!dirtyR) setFormR({ ...client.bmReceptiva, aquecimento: resolveAq(client.bmReceptiva) })
+    if (!dirtyA) setFormA({ ...client.bmAtiva, aquecimento: resolveAq(client.bmAtiva) })
   }, [client?.id, client?.atualizadoEm])
 
   if (!client) return null
@@ -206,12 +205,24 @@ export function ClienteAquecimento() {
 
   const aq = form.aquecimento ?? DEFAULT_AQUECIMENTO
 
+  // Updates config fields in local state only (requires explicit save button)
   function setAq<K extends keyof AquecimentoBM>(key: K, value: AquecimentoBM[K]) {
     setForm((f) => ({ ...f, aquecimento: { ...(f.aquecimento ?? DEFAULT_AQUECIMENTO), [key]: value } }))
     setDirty(true)
   }
 
-  function save() {
+  // Builds new form from current state + partial, persists immediately to store/DB
+  function applyAndSave(partialAq: Partial<AquecimentoBM>) {
+    const newAq = { ...(form.aquecimento ?? DEFAULT_AQUECIMENTO), ...partialAq }
+    const newForm = { ...form, aquecimento: newAq }
+    setForm(newForm)
+    setDirty(false)
+    const update = activeTab === 'receptiva' ? updateBMReceptiva : updateBMAtiva
+    update(client!.id, newForm)
+  }
+
+  // Config save (limite, dataInicio, observacoes)
+  function saveConfig() {
     const update = activeTab === 'receptiva' ? updateBMReceptiva : updateBMAtiva
     update(client!.id, form)
     setDirty(false)
@@ -219,54 +230,60 @@ export function ClienteAquecimento() {
 
   // ── Templates ──────────────────────────────────────────
   function handleSaveTemplate(data: Omit<BMTemplate, 'id'> | BMTemplate) {
-    if ('id' in data) {
-      setAq('templates', aq.templates.map((t) => t.id === data.id ? data : t))
-    } else {
-      setAq('templates', [...aq.templates, { ...data, id: makeId() }])
-    }
+    const newTemplates = 'id' in data
+      ? aq.templates.map((t) => t.id === data.id ? data : t)
+      : [...aq.templates, { ...data, id: makeId() }]
+    // Auto-advance: não_iniciado → template_criando when first template is added
+    const autoEtapa: EtapaAquecimento =
+      aq.etapa === 'não_iniciado' && newTemplates.length > 0 ? 'template_criando' : aq.etapa
+    applyAndSave({ templates: newTemplates, etapa: autoEtapa })
     setModal(null)
   }
   function deleteTemplate(id: string) {
-    setAq('templates', aq.templates.filter((t) => t.id !== id))
+    applyAndSave({ templates: aq.templates.filter((t) => t.id !== id) })
   }
 
   // ── Listas ─────────────────────────────────────────────
   function handleSaveLista(data: Omit<ListaAquecimento, 'id'> | ListaAquecimento) {
-    if ('id' in data) {
-      setAq('listas', aq.listas.map((l) => l.id === data.id ? data : l))
-    } else {
-      setAq('listas', [...aq.listas, { ...data, id: makeId() }])
-    }
+    const newListas = 'id' in data
+      ? aq.listas.map((l) => l.id === data.id ? data : l)
+      : [...aq.listas, { ...data, id: makeId() }]
+    applyAndSave({ listas: newListas })
     setModal(null)
   }
   function deleteLista(id: string) {
-    setAq('listas', aq.listas.filter((l) => l.id !== id))
+    applyAndSave({ listas: aq.listas.filter((l) => l.id !== id) })
   }
 
   // ── Cronograma ─────────────────────────────────────────
   function handleSaveCronograma(data: Omit<DisparoAgendado, 'id'> | DisparoAgendado) {
-    if ('id' in data) {
-      setAq('cronograma', aq.cronograma.map((c) => c.id === data.id ? data : c))
-    } else {
-      setAq('cronograma', [...aq.cronograma, { ...data, id: makeId() }])
-    }
+    const newCronograma = 'id' in data
+      ? aq.cronograma.map((c) => c.id === data.id ? data : c)
+      : [...aq.cronograma, { ...data, id: makeId() }]
+    applyAndSave({ cronograma: newCronograma })
     setModal(null)
   }
   function deleteCronograma(id: string) {
-    setAq('cronograma', aq.cronograma.filter((c) => c.id !== id))
+    applyAndSave({ cronograma: aq.cronograma.filter((c) => c.id !== id) })
   }
 
   // ── Disparos ───────────────────────────────────────────
+  const ETAPAS_ANTES_DISPARO: EtapaAquecimento[] = [
+    'não_iniciado', 'template_criando', 'template_aguardando', 'template_aprovado',
+  ]
   function handleSaveDisparo(data: Omit<Disparo, 'id'> | Disparo) {
-    if ('id' in data) {
-      setAq('disparos', aq.disparos.map((d) => d.id === data.id ? data : d))
-    } else {
-      setAq('disparos', [...aq.disparos, { ...data, id: makeId() }])
-    }
+    const isNew = !('id' in data)
+    const newDisparos = isNew
+      ? [...aq.disparos, { ...data, id: makeId() }]
+      : aq.disparos.map((d) => d.id === data.id ? data : d)
+    // Auto-advance: etapas iniciais → primeiro_disparo when first disparo is registered
+    const autoEtapa: EtapaAquecimento =
+      isNew && ETAPAS_ANTES_DISPARO.includes(aq.etapa) ? 'primeiro_disparo' : aq.etapa
+    applyAndSave({ disparos: newDisparos, etapa: autoEtapa })
     setModal(null)
   }
   function deleteDisparo(id: string) {
-    setAq('disparos', aq.disparos.filter((d) => d.id !== id))
+    applyAndSave({ disparos: aq.disparos.filter((d) => d.id !== id) })
   }
 
   // ── Computed values ────────────────────────────────────
@@ -309,12 +326,14 @@ export function ClienteAquecimento() {
         <div className="flex items-center gap-3 flex-shrink-0">
           {dirty && (
             <span className="text-xs text-orange-600 bg-orange-50 border border-orange-200 px-2 py-1 rounded-full">
-              Alterações não salvas
+              Configurações não salvas
             </span>
           )}
-          <Button variant="primary" onClick={save} disabled={!dirty}>
-            Salvar alterações
-          </Button>
+          {dirty && (
+            <Button variant="primary" onClick={saveConfig}>
+              Salvar configurações
+            </Button>
+          )}
         </div>
       </div>
 
@@ -337,7 +356,7 @@ export function ClienteAquecimento() {
                 label={ETAPA_OPTIONS.find((e) => e.value === aqBM.etapa)?.label ?? aqBM.etapa}
                 className={ETAPA_STYLE[aqBM.etapa].badge}
               />
-              {isDirty && <span className="w-1.5 h-1.5 bg-orange-500 rounded-full" />}
+              {isDirty && <span className="w-1.5 h-1.5 bg-orange-400 rounded-full" title="Configurações não salvas" />}
             </button>
           )
         })}
@@ -364,7 +383,7 @@ export function ClienteAquecimento() {
           </div>
           <p className="text-xs text-gray-400">Clique em uma etapa para avançar ou retroceder</p>
         </div>
-        <Stepper etapa={aq.etapa} onChange={(e) => setAq('etapa', e)} />
+        <Stepper etapa={aq.etapa} onChange={(e) => applyAndSave({ etapa: e })} />
       </Card>
 
       {/* ── Config + mini stats ── */}

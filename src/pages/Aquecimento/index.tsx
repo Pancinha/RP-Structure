@@ -89,6 +89,8 @@ function resolveAq(bm: BMData): AquecimentoBM {
     ...bm.aquecimento,
     templates: bm.aquecimento?.templates ?? [],
     disparos: bm.aquecimento?.disparos ?? [],
+    listas: bm.aquecimento?.listas ?? [],
+    cronograma: bm.aquecimento?.cronograma ?? [],
   }
 }
 
