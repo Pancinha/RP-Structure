@@ -58,6 +58,7 @@ export default function App() {
   const [loginStep, setLoginStep] = useState<LoginStep>('credentials')
 
   const loadClients = useStore((s) => s.loadClients)
+  const loadGlobalListas = useStore((s) => s.loadGlobalListas)
   const subscribeToChanges = useStore((s) => s.subscribeToChanges)
   const unsubscribeFromChanges = useStore((s) => s.unsubscribeFromChanges)
   const loading = useStore((s) => s.loading)
@@ -94,6 +95,7 @@ export default function App() {
         // Fully authenticated
         setAuthStatus('authenticated')
         loadClients()
+        loadGlobalListas()
         subscribeToChanges()
         return
       }
@@ -113,6 +115,7 @@ export default function App() {
   function handleAuthenticated() {
     setAuthStatus('authenticated')
     loadClients()
+    loadGlobalListas()
     subscribeToChanges()
   }
 

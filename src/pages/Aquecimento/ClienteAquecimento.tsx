@@ -4,7 +4,7 @@ import { differenceInDays } from 'date-fns'
 import {
   Flame, ChevronLeft, Plus, Trash2, Check, Pencil,
   TrendingUp, Calendar, Zap, CheckCircle2, ExternalLink,
-  ClipboardList, CheckCircle, FileText,
+  CheckCircle, FileText, List,
 } from 'lucide-react'
 import { useStore } from '../../store'
 import { Badge } from '../../components/ui/Badge'
@@ -14,7 +14,7 @@ import { Modal } from '../../components/ui/Modal'
 import { DEFAULT_AQUECIMENTO } from '../../types'
 import type {
   BMData, AquecimentoBM, BMTemplate, Disparo,
-  EtapaAquecimento, ListaAquecimento, DisparoAgendado,
+  EtapaAquecimento, GlobalLista, DisparoAgendado,
 } from '../../types'
 import { formatDateShort, statusBMColor } from '../../utils/format'
 
@@ -75,7 +75,7 @@ function qualidadeColor(q: string): string {
     : 'bg-gray-100 text-gray-400 border-gray-200'
 }
 
-function listaTipoColor(t: ListaAquecimento['tipo']): string {
+function listaTipoColor(t: GlobalLista['tipo']): string {
   return t === 'csv' ? 'bg-green-100 text-green-800 border-green-200'
     : t === 'xlsx' ? 'bg-blue-100 text-blue-800 border-blue-200'
     : t === 'pdf' ? 'bg-red-100 text-red-800 border-red-200'
@@ -157,8 +157,6 @@ function Stepper({ etapa, onChange }: { etapa: EtapaAquecimento; onChange: (e: E
 type ModalState =
   | { type: 'template-add' }
   | { type: 'template-edit'; data: BMTemplate }
-  | { type: 'lista-add' }
-  | { type: 'lista-edit'; data: ListaAquecimento }
   | { type: 'cronograma-add' }
   | { type: 'cronograma-edit'; data: DisparoAgendado }
   | { type: 'disparo-add' }
@@ -173,6 +171,7 @@ export function ClienteAquecimento() {
   const { clientId } = useParams<{ clientId: string }>()
   const navigate = useNavigate()
   const clients = useStore((s) => s.clients)
+  const globalListas = useStore((s) => s.globalListas)
   const updateBMReceptiva = useStore((s) => s.updateBMReceptiva)
   const updateBMAtiva = useStore((s) => s.updateBMAtiva)
 
@@ -243,18 +242,6 @@ export function ClienteAquecimento() {
     applyAndSave({ templates: aq.templates.filter((t) => t.id !== id) })
   }
 
-  // ── Listas ─────────────────────────────────────────────
-  function handleSaveLista(data: Omit<ListaAquecimento, 'id'> | ListaAquecimento) {
-    const newListas = 'id' in data
-      ? aq.listas.map((l) => l.id === data.id ? data : l)
-      : [...aq.listas, { ...data, id: makeId() }]
-    applyAndSave({ listas: newListas })
-    setModal(null)
-  }
-  function deleteLista(id: string) {
-    applyAndSave({ listas: aq.listas.filter((l) => l.id !== id) })
-  }
-
   // ── Cronograma ─────────────────────────────────────────
   function handleSaveCronograma(data: Omit<DisparoAgendado, 'id'> | DisparoAgendado) {
     const newCronograma = 'id' in data
@@ -295,7 +282,6 @@ export function ClienteAquecimento() {
   const diasAquecendo = aq.dataInicio ? differenceInDays(new Date(), new Date(aq.dataInicio)) : null
   const etapaAtual = ETAPA_OPTIONS.find((e) => e.value === aq.etapa)!
   const cronogramaOrdenado = [...aq.cronograma].sort((a, b) => a.dataPlanejada.localeCompare(b.dataPlanejada))
-  const listasOrdenadas = [...aq.listas].sort((a, b) => b.dataAdicionada.localeCompare(a.dataAdicionada))
 
   const bmLabel = activeTab === 'receptiva' ? 'BM Receptiva' : 'BM Ativa'
 
@@ -511,63 +497,33 @@ export function ClienteAquecimento() {
         )}
       </Card>
 
-      {/* ── Listas ────────────────────────────────────── */}
-      <Card className="p-5">
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-2">
-            <ClipboardList size={16} className="text-gray-400" />
-            <h3 className="text-sm font-semibold text-gray-800">Listas de disparo</h3>
-            <span className="text-xs text-gray-400">{aq.listas.length} lista{aq.listas.length !== 1 ? 's' : ''}</span>
-          </div>
-          <Button variant="secondary" size="sm" onClick={() => setModal({ type: 'lista-add' })}>
-            <Plus size={13} /> Adicionar lista
-          </Button>
+      {/* ── Listas globais (link) ─────────────────────── */}
+      {globalListas.length === 0 && (
+        <div className="flex items-center gap-3 px-4 py-3 bg-blue-50 border border-blue-200 rounded-xl text-sm">
+          <List size={15} className="text-blue-500 flex-shrink-0" />
+          <p className="text-blue-800 text-xs">
+            Nenhuma lista cadastrada ainda. Vá em{' '}
+            <Link to="/aquecimento" className="font-semibold underline hover:text-blue-600">
+              Aquecimento → Listas de disparo
+            </Link>{' '}
+            para adicionar as suas listas CSV.
+          </p>
         </div>
-
-        {listasOrdenadas.length === 0 ? (
-          <div className="py-8 flex flex-col items-center gap-2 text-gray-400 bg-gray-50 rounded-xl">
-            <ClipboardList size={24} className="text-gray-300" />
-            <p className="text-sm">Nenhuma lista cadastrada.</p>
-            <p className="text-xs text-gray-400">Adicione as listas de contatos que serão usadas nos disparos.</p>
-          </div>
-        ) : (
-          <div className="space-y-2">
-            {listasOrdenadas.map((l) => (
-              <div key={l.id} className="flex items-center gap-3 p-3 bg-gray-50 rounded-xl border border-gray-100 group">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <p className="text-sm font-semibold text-gray-900">{l.nome}</p>
-                    <Badge label={l.tipo.toUpperCase()} className={listaTipoColor(l.tipo)} />
-                    {l.arquivo && <span className="text-xs text-gray-400">📄 {l.arquivo}</span>}
-                    {l.urlExterno && (
-                      <a href={l.urlExterno} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:underline flex items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
-                        <ExternalLink size={10} /> Abrir arquivo
-                      </a>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-4 mt-1">
-                    {l.totalContatos > 0 && (
-                      <p className="text-xs text-gray-500 font-medium">{l.totalContatos.toLocaleString('pt-BR')} contatos</p>
-                    )}
-                    {l.dataAdicionada && (
-                      <p className="text-xs text-gray-400">Adicionada: {formatDateShort(l.dataAdicionada)}</p>
-                    )}
-                    {l.observacoes && <p className="text-xs text-gray-400 italic truncate max-w-48">{l.observacoes}</p>}
-                  </div>
-                </div>
-                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
-                  <button onClick={() => setModal({ type: 'lista-edit', data: { ...l } })} className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors">
-                    <Pencil size={12} />
-                  </button>
-                  <button onClick={() => deleteLista(l.id)} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors">
-                    <Trash2 size={12} />
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </Card>
+      )}
+      {globalListas.length > 0 && (
+        <div className="px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl flex items-center gap-3 text-xs text-gray-500">
+          <List size={14} className="text-gray-400 flex-shrink-0" />
+          <span>
+            <span className="font-semibold text-gray-700">{globalListas.length} lista{globalListas.length !== 1 ? 's' : ''}</span>
+            {' '}disponíve{globalListas.length !== 1 ? 'is' : 'l'} para disparo
+            {' · '}
+            {globalListas.reduce((s, l) => s + (l.totalContatos || 0), 0).toLocaleString('pt-BR')} contatos no total
+          </span>
+          <Link to="/aquecimento" className="ml-auto text-blue-600 hover:underline flex items-center gap-1 flex-shrink-0">
+            Gerenciar listas <ExternalLink size={10} />
+          </Link>
+        </div>
+      )}
 
       {/* ── Cronograma ────────────────────────────────── */}
       <Card className="p-5">
@@ -594,7 +550,7 @@ export function ClienteAquecimento() {
             <div className="space-y-2">
               {cronogramaOrdenado.map((c) => {
                 const isPast = c.dataPlanejada < new Date().toISOString().slice(0, 10)
-                const lista = aq.listas.find((l) => l.id === c.listaId)
+                const lista = globalListas.find((l) => l.id === c.listaId)
                 return (
                   <div key={c.id} className="pl-6 relative group">
                     <div className={`absolute left-0 top-3 w-3.5 h-3.5 rounded-full border-2 border-white shadow-sm
@@ -611,7 +567,8 @@ export function ClienteAquecimento() {
                           <span className="text-sm font-semibold text-gray-900">{formatDateShort(c.dataPlanejada)}</span>
                           <Badge label={c.status === 'planejado' ? 'Planejado' : c.status === 'realizado' ? 'Realizado' : 'Cancelado'} className={cronogramaStatusColor(c.status)} />
                           {c.nomeLista && <span className="text-xs text-gray-600">{c.nomeLista}</span>}
-                          {lista && <span className="text-xs text-gray-400">(📄 {lista.arquivo || lista.nome})</span>}
+                          {lista && <Badge label={lista.tipo.toUpperCase()} className={listaTipoColor(lista.tipo)} />}
+                          {lista?.arquivo && <span className="text-xs text-gray-400">📄 {lista.arquivo}</span>}
                         </div>
                         <div className="flex items-center gap-3 mt-1">
                           {c.leadsPlanificados > 0 && (
@@ -744,22 +701,6 @@ export function ClienteAquecimento() {
         )}
       </Modal>
 
-      {/* Lista */}
-      <Modal
-        open={modal?.type === 'lista-add' || modal?.type === 'lista-edit'}
-        onClose={() => setModal(null)}
-        title={modal?.type === 'lista-edit' ? 'Editar lista' : 'Adicionar lista'}
-        size="md"
-      >
-        {(modal?.type === 'lista-add' || modal?.type === 'lista-edit') && (
-          <ListaForm
-            initial={modal.type === 'lista-edit' ? modal.data : undefined}
-            onSave={handleSaveLista}
-            onCancel={() => setModal(null)}
-          />
-        )}
-      </Modal>
-
       {/* Cronograma */}
       <Modal
         open={modal?.type === 'cronograma-add' || modal?.type === 'cronograma-edit'}
@@ -770,7 +711,7 @@ export function ClienteAquecimento() {
         {(modal?.type === 'cronograma-add' || modal?.type === 'cronograma-edit') && (
           <CronogramaForm
             initial={modal.type === 'cronograma-edit' ? modal.data : undefined}
-            listas={aq.listas}
+            listas={globalListas}
             onSave={handleSaveCronograma}
             onCancel={() => setModal(null)}
           />
@@ -787,7 +728,7 @@ export function ClienteAquecimento() {
         {(modal?.type === 'disparo-add' || modal?.type === 'disparo-edit') && (
           <DisparoForm
             initial={modal.type === 'disparo-edit' ? modal.data : undefined}
-            listas={aq.listas}
+            listas={globalListas}
             onSave={handleSaveDisparo}
             onCancel={() => setModal(null)}
           />
@@ -860,69 +801,6 @@ function TemplateForm({
   )
 }
 
-function ListaForm({
-  initial,
-  onSave,
-  onCancel,
-}: {
-  initial?: ListaAquecimento
-  onSave: (data: Omit<ListaAquecimento, 'id'> | ListaAquecimento) => void
-  onCancel: () => void
-}) {
-  const [v, setV] = useState<Omit<ListaAquecimento, 'id'> | ListaAquecimento>(
-    initial ?? { nome: '', arquivo: '', urlExterno: '', tipo: 'xlsx', totalContatos: 0, dataAdicionada: new Date().toISOString().slice(0, 10), observacoes: '' }
-  )
-  const set = <K extends keyof typeof v>(k: K, val: (typeof v)[K]) => setV((f) => ({ ...f, [k]: val }))
-  return (
-    <div className="space-y-4">
-      <div>
-        <label className="block text-xs font-medium text-gray-700 mb-1">Nome descritivo da lista *</label>
-        <input type="text" value={v.nome} onChange={(e) => set('nome', e.target.value)} placeholder="Ex: Lista leads maio" className={inputCls} autoFocus />
-      </div>
-      <div className="grid grid-cols-2 gap-4">
-        <div>
-          <label className="block text-xs font-medium text-gray-700 mb-1">Nome do arquivo</label>
-          <input type="text" value={v.arquivo} onChange={(e) => set('arquivo', e.target.value)} placeholder="Ex: leads-maio.xlsx" className={inputCls} />
-        </div>
-        <div>
-          <label className="block text-xs font-medium text-gray-700 mb-1">Tipo de arquivo</label>
-          <select value={v.tipo} onChange={(e) => set('tipo', e.target.value as ListaAquecimento['tipo'])} className={inputCls}>
-            <option value="xlsx">Excel (.xlsx)</option>
-            <option value="csv">CSV (.csv)</option>
-            <option value="pdf">PDF (.pdf)</option>
-            <option value="outro">Outro</option>
-          </select>
-        </div>
-        <div>
-          <label className="block text-xs font-medium text-gray-700 mb-1">Total de contatos</label>
-          <input type="number" min={0} value={v.totalContatos} onChange={(e) => set('totalContatos', Number(e.target.value))} className={inputCls} />
-        </div>
-        <div>
-          <label className="block text-xs font-medium text-gray-700 mb-1">Data de adição</label>
-          <input type="date" value={v.dataAdicionada} onChange={(e) => set('dataAdicionada', e.target.value)} className={inputCls} />
-        </div>
-      </div>
-      <div>
-        <label className="block text-xs font-medium text-gray-700 mb-1">
-          Link externo (Google Drive / Dropbox)
-          <span className="text-gray-400 font-normal ml-1">— opcional</span>
-        </label>
-        <input type="url" value={v.urlExterno} onChange={(e) => set('urlExterno', e.target.value)} placeholder="https://drive.google.com/..." className={inputCls} />
-      </div>
-      <div>
-        <label className="block text-xs font-medium text-gray-700 mb-1">Observações</label>
-        <textarea value={v.observacoes} onChange={(e) => set('observacoes', e.target.value)} rows={2} className={inputCls} />
-      </div>
-      <div className="flex justify-end gap-3 pt-2">
-        <Button variant="secondary" onClick={onCancel}>Cancelar</Button>
-        <Button variant="primary" onClick={() => onSave(v)} disabled={!v.nome.trim()}>
-          {initial ? 'Salvar' : 'Adicionar'}
-        </Button>
-      </div>
-    </div>
-  )
-}
-
 function CronogramaForm({
   initial,
   listas,
@@ -930,7 +808,7 @@ function CronogramaForm({
   onCancel,
 }: {
   initial?: DisparoAgendado
-  listas: ListaAquecimento[]
+  listas: GlobalLista[]
   onSave: (data: Omit<DisparoAgendado, 'id'> | DisparoAgendado) => void
   onCancel: () => void
 }) {
@@ -999,7 +877,7 @@ function DisparoForm({
   onCancel,
 }: {
   initial?: Disparo
-  listas: ListaAquecimento[]
+  listas: GlobalLista[]
   onSave: (data: Omit<Disparo, 'id'> | Disparo) => void
   onCancel: () => void
 }) {

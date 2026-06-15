@@ -155,6 +155,17 @@ export interface ListaAquecimento {
   observacoes: string
 }
 
+export interface GlobalLista {
+  id: string
+  nome: string
+  arquivo: string
+  urlExterno: string
+  tipo: 'csv' | 'xlsx' | 'pdf' | 'outro'
+  totalContatos: number
+  observacoes: string
+  criadoEm: string
+}
+
 export interface DisparoAgendado {
   id: string
   dataPlanejada: string

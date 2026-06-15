@@ -5,13 +5,209 @@ import {
   Flame, ChevronRight, Zap, Users, TrendingUp, BarChart2,
   AlertTriangle, Clock, CheckCircle2, MessageSquare, Target,
   ArrowRight, Search, ThumbsDown, Activity, Filter,
+  List, Plus, Pencil, Trash2, ExternalLink,
 } from 'lucide-react'
 import { useStore } from '../../store'
 import { Badge } from '../../components/ui/Badge'
 import { Card } from '../../components/ui/Card'
+import { Button } from '../../components/ui/Button'
+import { Modal } from '../../components/ui/Modal'
 import { DEFAULT_AQUECIMENTO } from '../../types'
-import type { EtapaAquecimento, BMData, AquecimentoBM, Disparo } from '../../types'
+import type { EtapaAquecimento, BMData, AquecimentoBM, Disparo, GlobalLista } from '../../types'
 import { formatDateShort } from '../../utils/format'
+
+const inputCls = 'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500'
+
+function listaTipoColor(t: GlobalLista['tipo']): string {
+  return t === 'csv' ? 'bg-green-100 text-green-800 border-green-200'
+    : t === 'xlsx' ? 'bg-blue-100 text-blue-800 border-blue-200'
+    : t === 'pdf' ? 'bg-red-100 text-red-800 border-red-200'
+    : 'bg-gray-100 text-gray-600 border-gray-200'
+}
+
+type ListaModal = { type: 'add' } | { type: 'edit'; data: GlobalLista } | null
+
+function ListaForm({
+  initial,
+  onSave,
+  onCancel,
+}: {
+  initial?: GlobalLista
+  onSave: (data: Omit<GlobalLista, 'id' | 'criadoEm'>) => void
+  onCancel: () => void
+}) {
+  const [v, setV] = useState({
+    nome: initial?.nome ?? '',
+    arquivo: initial?.arquivo ?? '',
+    urlExterno: initial?.urlExterno ?? '',
+    tipo: initial?.tipo ?? 'csv' as GlobalLista['tipo'],
+    totalContatos: initial?.totalContatos ?? 0,
+    observacoes: initial?.observacoes ?? '',
+  })
+  const set = <K extends keyof typeof v>(k: K, val: (typeof v)[K]) => setV((f) => ({ ...f, [k]: val }))
+  return (
+    <div className="space-y-4">
+      <div>
+        <label className="block text-xs font-medium text-gray-700 mb-1">Nome descritivo *</label>
+        <input type="text" value={v.nome} onChange={(e) => set('nome', e.target.value)} placeholder="Ex: Lista leads junho" className={inputCls} autoFocus />
+      </div>
+      <div className="grid grid-cols-2 gap-4">
+        <div>
+          <label className="block text-xs font-medium text-gray-700 mb-1">Nome do arquivo</label>
+          <input type="text" value={v.arquivo} onChange={(e) => set('arquivo', e.target.value)} placeholder="Ex: leads-junho.csv" className={inputCls} />
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-gray-700 mb-1">Tipo</label>
+          <select value={v.tipo} onChange={(e) => set('tipo', e.target.value as GlobalLista['tipo'])} className={inputCls}>
+            <option value="csv">CSV (.csv)</option>
+            <option value="xlsx">Excel (.xlsx)</option>
+            <option value="pdf">PDF (.pdf)</option>
+            <option value="outro">Outro</option>
+          </select>
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-gray-700 mb-1">Total de contatos</label>
+          <input type="number" min={0} value={v.totalContatos} onChange={(e) => set('totalContatos', Number(e.target.value))} className={inputCls} />
+        </div>
+      </div>
+      <div>
+        <label className="block text-xs font-medium text-gray-700 mb-1">
+          Link externo <span className="text-gray-400 font-normal">(Google Drive / Dropbox — opcional)</span>
+        </label>
+        <input type="url" value={v.urlExterno} onChange={(e) => set('urlExterno', e.target.value)} placeholder="https://drive.google.com/..." className={inputCls} />
+      </div>
+      <div>
+        <label className="block text-xs font-medium text-gray-700 mb-1">Observações</label>
+        <textarea value={v.observacoes} onChange={(e) => set('observacoes', e.target.value)} rows={2} className={inputCls} />
+      </div>
+      <div className="flex justify-end gap-3 pt-2">
+        <Button variant="secondary" onClick={onCancel}>Cancelar</Button>
+        <Button variant="primary" onClick={() => onSave(v)} disabled={!v.nome.trim()}>
+          {initial ? 'Salvar' : 'Adicionar lista'}
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+function ListasSection() {
+  const globalListas = useStore((s) => s.globalListas)
+  const addGlobalLista = useStore((s) => s.addGlobalLista)
+  const updateGlobalLista = useStore((s) => s.updateGlobalLista)
+  const deleteGlobalLista = useStore((s) => s.deleteGlobalLista)
+  const [modal, setModal] = useState<ListaModal>(null)
+
+  const sorted = [...globalListas].sort((a, b) => b.criadoEm.localeCompare(a.criadoEm))
+  const totalContatos = globalListas.reduce((s, l) => s + (l.totalContatos || 0), 0)
+
+  function handleSave(data: Omit<GlobalLista, 'id' | 'criadoEm'>) {
+    if (modal?.type === 'edit') {
+      updateGlobalLista(modal.data.id, data)
+    } else {
+      addGlobalLista(data)
+    }
+    setModal(null)
+  }
+
+  return (
+    <div className="space-y-5">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-lg font-semibold text-gray-900">Listas de disparo</h2>
+          <p className="text-sm text-gray-500 mt-0.5">
+            {globalListas.length} lista{globalListas.length !== 1 ? 's' : ''} · {totalContatos.toLocaleString('pt-BR')} contatos no total
+          </p>
+        </div>
+        <Button variant="primary" onClick={() => setModal({ type: 'add' })}>
+          <Plus size={14} /> Nova lista
+        </Button>
+      </div>
+
+      {sorted.length === 0 ? (
+        <Card className="p-12 flex flex-col items-center gap-3 text-gray-400">
+          <List size={32} className="text-gray-300" />
+          <p className="text-sm font-medium">Nenhuma lista cadastrada</p>
+          <p className="text-xs text-gray-400">Adicione as listas CSV que você usa para os disparos de aquecimento.</p>
+          <Button variant="secondary" onClick={() => setModal({ type: 'add' })}>
+            <Plus size={13} /> Adicionar primeira lista
+          </Button>
+        </Card>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+          {sorted.map((l) => (
+            <Card key={l.id} className="p-4 group">
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <p className="text-sm font-semibold text-gray-900 truncate">{l.nome}</p>
+                    <Badge label={l.tipo.toUpperCase()} className={listaTipoColor(l.tipo)} />
+                  </div>
+                  {l.arquivo && (
+                    <p className="text-xs text-gray-500 mt-1 truncate">📄 {l.arquivo}</p>
+                  )}
+                  {l.totalContatos > 0 && (
+                    <p className="text-sm font-bold text-blue-700 mt-2">
+                      {l.totalContatos.toLocaleString('pt-BR')}
+                      <span className="text-xs text-gray-400 font-normal ml-1">contatos</span>
+                    </p>
+                  )}
+                  {l.observacoes && (
+                    <p className="text-xs text-gray-400 italic mt-1.5 line-clamp-2">{l.observacoes}</p>
+                  )}
+                  {l.urlExterno && (
+                    <a
+                      href={l.urlExterno}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 text-xs text-blue-600 hover:underline mt-2"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <ExternalLink size={10} /> Abrir arquivo
+                    </a>
+                  )}
+                </div>
+                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+                  <button
+                    onClick={() => setModal({ type: 'edit', data: l })}
+                    className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                    title="Editar"
+                  >
+                    <Pencil size={13} />
+                  </button>
+                  <button
+                    onClick={() => deleteGlobalLista(l.id)}
+                    className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                    title="Excluir"
+                  >
+                    <Trash2 size={13} />
+                  </button>
+                </div>
+              </div>
+              <p className="text-[10px] text-gray-300 mt-3">
+                Adicionada em {formatDateShort(l.criadoEm)}
+              </p>
+            </Card>
+          ))}
+        </div>
+      )}
+
+      <Modal
+        open={modal !== null}
+        onClose={() => setModal(null)}
+        title={modal?.type === 'edit' ? 'Editar lista' : 'Nova lista de disparo'}
+        size="md"
+      >
+        {modal !== null && (
+          <ListaForm
+            initial={modal.type === 'edit' ? modal.data : undefined}
+            onSave={handleSave}
+            onCancel={() => setModal(null)}
+          />
+        )}
+      </Modal>
+    </div>
+  )
+}
 
 interface BMRow {
   clientId: string
@@ -226,6 +422,7 @@ function TaxaLineChart({
 export function Aquecimento() {
   const clients = useStore((s) => s.clients)
   const navigate = useNavigate()
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'listas'>('dashboard')
   const [tipoFilter, setTipoFilter] = useState<TipoFilter>('todos')
   const [etapaFilter, setEtapaFilter] = useState<EtapaFilter>('todas')
   const [search, setSearch] = useState('')
@@ -377,7 +574,7 @@ export function Aquecimento() {
             </p>
           </div>
         </div>
-        {allDisparos[0] && (
+        {activeTab === 'dashboard' && allDisparos[0] && (
           <div className="text-right">
             <p className="text-xs text-gray-400">Último disparo</p>
             <p className="text-sm font-medium text-gray-700">{allDisparos[0].clientNome}</p>
@@ -385,6 +582,29 @@ export function Aquecimento() {
           </div>
         )}
       </div>
+
+      {/* ── Tabs ────────────────────────────────────────── */}
+      <div className="flex items-center gap-1 p-1 bg-gray-100 rounded-xl w-fit">
+        <button
+          onClick={() => setActiveTab('dashboard')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+            activeTab === 'dashboard' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-700'
+          }`}
+        >
+          <Flame size={14} /> Dashboard
+        </button>
+        <button
+          onClick={() => setActiveTab('listas')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+            activeTab === 'listas' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-700'
+          }`}
+        >
+          <List size={14} /> Listas de disparo
+        </button>
+      </div>
+
+      {activeTab === 'listas' && <ListasSection />}
+      {activeTab === 'dashboard' && (<>
 
       {/* ── Stats row ───────────────────────────────────── */}
       <div className="grid grid-cols-2 xl:grid-cols-4 gap-4">
@@ -849,6 +1069,7 @@ export function Aquecimento() {
           </div>
         </Card>
       )}
+      </>)}
     </div>
   )
 }

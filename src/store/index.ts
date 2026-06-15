@@ -12,6 +12,7 @@ import type {
   StatusAtivo,
   StatusNumero,
   StatusDataCrazy,
+  GlobalLista,
 } from '../types'
 import {
   DEFAULT_FACEBOOK,
@@ -65,12 +66,19 @@ interface StoreState {
   deleteAutomation: (clientId: string, automationId: string) => void
   subscribeToChanges: () => void
   unsubscribeFromChanges: () => void
+  // Global listas de disparo
+  globalListas: GlobalLista[]
+  loadGlobalListas: () => Promise<void>
+  addGlobalLista: (data: Omit<GlobalLista, 'id' | 'criadoEm'>) => void
+  updateGlobalLista: (id: string, data: Partial<GlobalLista>) => void
+  deleteGlobalLista: (id: string) => void
 }
 
 export const useStore = create<StoreState>()((set, get) => ({
   clients: [],
   loading: true,
   loadError: null,
+  globalListas: [],
 
   loadClients: async () => {
     set({ loading: true, loadError: null })
@@ -377,5 +385,41 @@ export const useStore = create<StoreState>()((set, get) => ({
       realtimeChannel.unsubscribe()
       realtimeChannel = null
     }
+  },
+
+  loadGlobalListas: async () => {
+    const { data, error } = await supabase.from('global_listas').select('data')
+    if (!error && data) {
+      set({ globalListas: data.map((r) => r.data as GlobalLista) })
+    }
+  },
+
+  addGlobalLista: (data) => {
+    const now = new Date().toISOString()
+    const nova: GlobalLista = {
+      ...data,
+      id: `lista-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      criadoEm: now,
+    }
+    set((s) => ({ globalListas: [...s.globalListas, nova] }))
+    supabase.from('global_listas').insert({ id: nova.id, data: nova, created_at: now }).then()
+  },
+
+  updateGlobalLista: (id, partial) => {
+    set((s) => ({
+      globalListas: s.globalListas.map((l) => l.id === id ? { ...l, ...partial } : l),
+    }))
+    const updated = get().globalListas.find((l) => l.id === id)
+    if (updated) {
+      supabase
+        .from('global_listas')
+        .upsert({ id, data: updated, updated_at: new Date().toISOString() })
+        .then()
+    }
+  },
+
+  deleteGlobalLista: (id) => {
+    set((s) => ({ globalListas: s.globalListas.filter((l) => l.id !== id) }))
+    supabase.from('global_listas').delete().eq('id', id).then()
   },
 }))
