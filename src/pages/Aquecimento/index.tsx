@@ -1,13 +1,14 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { differenceInDays } from 'date-fns'
 import {
   Flame, ChevronRight, Zap, Users, TrendingUp, BarChart2,
   AlertTriangle, Clock, CheckCircle2, MessageSquare, Target,
   ArrowRight, Search, ThumbsDown, Activity, Filter,
-  List, Plus, Pencil, Trash2, ExternalLink,
+  List, Plus, Pencil, Trash2, Download, Upload, FileText,
 } from 'lucide-react'
 import { useStore } from '../../store'
+import { supabase } from '../../lib/supabase'
 import { Badge } from '../../components/ui/Badge'
 import { Card } from '../../components/ui/Card'
 import { Button } from '../../components/ui/Button'
@@ -27,35 +28,126 @@ function listaTipoColor(t: GlobalLista['tipo']): string {
 
 type ListaModal = { type: 'add' } | { type: 'edit'; data: GlobalLista } | null
 
+const ACCEPTED_TYPES = '.csv,.xlsx,.xls'
+const MIME_EXT_MAP: Record<string, GlobalLista['tipo']> = {
+  'text/csv': 'csv',
+  'application/csv': 'csv',
+  'application/vnd.ms-excel': 'xlsx',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',
+}
+
+function inferTipo(file: File): GlobalLista['tipo'] {
+  return MIME_EXT_MAP[file.type] ?? (file.name.endsWith('.csv') ? 'csv' : 'xlsx')
+}
+
 function ListaForm({
   initial,
   onSave,
   onCancel,
 }: {
   initial?: GlobalLista
-  onSave: (data: Omit<GlobalLista, 'id' | 'criadoEm'>) => void
+  onSave: (data: Omit<GlobalLista, 'id' | 'criadoEm'>) => Promise<void>
   onCancel: () => void
 }) {
+  const fileRef = useRef<HTMLInputElement>(null)
   const [v, setV] = useState({
     nome: initial?.nome ?? '',
     arquivo: initial?.arquivo ?? '',
-    urlExterno: initial?.urlExterno ?? '',
+    arquivoPath: initial?.arquivoPath ?? '',
     tipo: initial?.tipo ?? 'csv' as GlobalLista['tipo'],
     totalContatos: initial?.totalContatos ?? 0,
     observacoes: initial?.observacoes ?? '',
   })
+  const [selectedFile, setSelectedFile] = useState<File | null>(null)
+  const [uploading, setUploading] = useState(false)
+  const [uploadError, setUploadError] = useState('')
   const set = <K extends keyof typeof v>(k: K, val: (typeof v)[K]) => setV((f) => ({ ...f, [k]: val }))
+
+  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setSelectedFile(file)
+    setUploadError('')
+    if (!v.nome) set('nome', file.name.replace(/\.[^.]+$/, ''))
+    set('arquivo', file.name)
+    set('tipo', inferTipo(file))
+  }
+
+  async function handleSave() {
+    let arquivoPath = v.arquivoPath
+    let arquivo = v.arquivo
+
+    if (selectedFile) {
+      setUploading(true)
+      setUploadError('')
+      const path = `${Date.now()}_${selectedFile.name.replace(/\s+/g, '_')}`
+      const { error } = await supabase.storage.from('listas').upload(path, selectedFile, { upsert: true })
+      if (error) {
+        setUploadError('Erro ao fazer upload: ' + error.message)
+        setUploading(false)
+        return
+      }
+      // Delete old file if replacing
+      if (initial?.arquivoPath && initial.arquivoPath !== path) {
+        supabase.storage.from('listas').remove([initial.arquivoPath]).then()
+      }
+      arquivoPath = path
+      arquivo = selectedFile.name
+      setUploading(false)
+    }
+
+    await onSave({ ...v, arquivo, arquivoPath })
+  }
+
   return (
     <div className="space-y-4">
       <div>
         <label className="block text-xs font-medium text-gray-700 mb-1">Nome descritivo *</label>
         <input type="text" value={v.nome} onChange={(e) => set('nome', e.target.value)} placeholder="Ex: Lista leads junho" className={inputCls} autoFocus />
       </div>
+
+      {/* File upload */}
+      <div>
+        <label className="block text-xs font-medium text-gray-700 mb-1">Arquivo</label>
+        <input ref={fileRef} type="file" accept={ACCEPTED_TYPES} onChange={handleFileChange} className="hidden" />
+        {v.arquivo && !selectedFile ? (
+          <div className="flex items-center gap-3 p-3 bg-gray-50 border border-gray-200 rounded-lg">
+            <FileText size={16} className="text-blue-500 flex-shrink-0" />
+            <span className="text-sm text-gray-700 truncate flex-1">{v.arquivo}</span>
+            <button
+              type="button"
+              onClick={() => fileRef.current?.click()}
+              className="text-xs text-blue-600 hover:underline flex-shrink-0"
+            >
+              Substituir
+            </button>
+          </div>
+        ) : selectedFile ? (
+          <div className="flex items-center gap-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+            <FileText size={16} className="text-blue-500 flex-shrink-0" />
+            <span className="text-sm text-blue-700 truncate flex-1">{selectedFile.name}</span>
+            <button
+              type="button"
+              onClick={() => { setSelectedFile(null); set('arquivo', initial?.arquivo ?? ''); set('arquivoPath', initial?.arquivoPath ?? '') }}
+              className="text-xs text-gray-400 hover:text-gray-600 flex-shrink-0"
+            >
+              ✕
+            </button>
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => fileRef.current?.click()}
+            className="w-full flex flex-col items-center gap-2 p-6 border-2 border-dashed border-gray-300 rounded-lg text-gray-400 hover:border-blue-400 hover:text-blue-500 transition-colors"
+          >
+            <Upload size={20} />
+            <span className="text-sm">Clique para selecionar arquivo CSV ou Excel</span>
+          </button>
+        )}
+        {uploadError && <p className="text-xs text-red-600 mt-1">{uploadError}</p>}
+      </div>
+
       <div className="grid grid-cols-2 gap-4">
-        <div>
-          <label className="block text-xs font-medium text-gray-700 mb-1">Nome do arquivo</label>
-          <input type="text" value={v.arquivo} onChange={(e) => set('arquivo', e.target.value)} placeholder="Ex: leads-junho.csv" className={inputCls} />
-        </div>
         <div>
           <label className="block text-xs font-medium text-gray-700 mb-1">Tipo</label>
           <select value={v.tipo} onChange={(e) => set('tipo', e.target.value as GlobalLista['tipo'])} className={inputCls}>
@@ -71,23 +163,27 @@ function ListaForm({
         </div>
       </div>
       <div>
-        <label className="block text-xs font-medium text-gray-700 mb-1">
-          Link externo <span className="text-gray-400 font-normal">(Google Drive / Dropbox — opcional)</span>
-        </label>
-        <input type="url" value={v.urlExterno} onChange={(e) => set('urlExterno', e.target.value)} placeholder="https://drive.google.com/..." className={inputCls} />
-      </div>
-      <div>
         <label className="block text-xs font-medium text-gray-700 mb-1">Observações</label>
         <textarea value={v.observacoes} onChange={(e) => set('observacoes', e.target.value)} rows={2} className={inputCls} />
       </div>
       <div className="flex justify-end gap-3 pt-2">
-        <Button variant="secondary" onClick={onCancel}>Cancelar</Button>
-        <Button variant="primary" onClick={() => onSave(v)} disabled={!v.nome.trim()}>
-          {initial ? 'Salvar' : 'Adicionar lista'}
+        <Button variant="secondary" onClick={onCancel} disabled={uploading}>Cancelar</Button>
+        <Button variant="primary" onClick={handleSave} disabled={!v.nome.trim() || uploading}>
+          {uploading ? 'Enviando arquivo...' : initial ? 'Salvar' : 'Adicionar lista'}
         </Button>
       </div>
     </div>
   )
+}
+
+async function downloadLista(lista: GlobalLista) {
+  if (!lista.arquivoPath) return
+  const { data, error } = await supabase.storage.from('listas').createSignedUrl(lista.arquivoPath, 60)
+  if (error || !data?.signedUrl) return
+  const a = document.createElement('a')
+  a.href = data.signedUrl
+  a.download = lista.arquivo || lista.nome
+  a.click()
 }
 
 function ListasSection() {
@@ -96,17 +192,24 @@ function ListasSection() {
   const updateGlobalLista = useStore((s) => s.updateGlobalLista)
   const deleteGlobalLista = useStore((s) => s.deleteGlobalLista)
   const [modal, setModal] = useState<ListaModal>(null)
+  const [downloading, setDownloading] = useState<string | null>(null)
 
   const sorted = [...globalListas].sort((a, b) => b.criadoEm.localeCompare(a.criadoEm))
   const totalContatos = globalListas.reduce((s, l) => s + (l.totalContatos || 0), 0)
 
-  function handleSave(data: Omit<GlobalLista, 'id' | 'criadoEm'>) {
+  async function handleSave(data: Omit<GlobalLista, 'id' | 'criadoEm'>) {
     if (modal?.type === 'edit') {
       updateGlobalLista(modal.data.id, data)
     } else {
       addGlobalLista(data)
     }
     setModal(null)
+  }
+
+  async function handleDownload(lista: GlobalLista) {
+    setDownloading(lista.id)
+    await downloadLista(lista)
+    setDownloading(null)
   }
 
   return (
@@ -154,16 +257,15 @@ function ListasSection() {
                   {l.observacoes && (
                     <p className="text-xs text-gray-400 italic mt-1.5 line-clamp-2">{l.observacoes}</p>
                   )}
-                  {l.urlExterno && (
-                    <a
-                      href={l.urlExterno}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1 text-xs text-blue-600 hover:underline mt-2"
-                      onClick={(e) => e.stopPropagation()}
+                  {l.arquivoPath && (
+                    <button
+                      onClick={() => handleDownload(l)}
+                      disabled={downloading === l.id}
+                      className="inline-flex items-center gap-1.5 text-xs text-blue-600 hover:text-blue-800 font-medium mt-2 disabled:opacity-50"
                     >
-                      <ExternalLink size={10} /> Abrir arquivo
-                    </a>
+                      <Download size={11} />
+                      {downloading === l.id ? 'Baixando...' : 'Baixar arquivo'}
+                    </button>
                   )}
                 </div>
                 <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">

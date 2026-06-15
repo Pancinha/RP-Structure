@@ -419,7 +419,11 @@ export const useStore = create<StoreState>()((set, get) => ({
   },
 
   deleteGlobalLista: (id) => {
+    const lista = get().globalListas.find((l) => l.id === id)
     set((s) => ({ globalListas: s.globalListas.filter((l) => l.id !== id) }))
     supabase.from('global_listas').delete().eq('id', id).then()
+    if (lista?.arquivoPath) {
+      supabase.storage.from('listas').remove([lista.arquivoPath]).then()
+    }
   },
 }))

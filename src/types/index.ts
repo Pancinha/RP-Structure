@@ -159,7 +159,7 @@ export interface GlobalLista {
   id: string
   nome: string
   arquivo: string
-  urlExterno: string
+  arquivoPath: string
   tipo: 'csv' | 'xlsx' | 'pdf' | 'outro'
   totalContatos: number
   observacoes: string
