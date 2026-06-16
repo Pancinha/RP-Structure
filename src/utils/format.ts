@@ -14,7 +14,14 @@ export function formatDate(iso: string): string {
 export function formatDateShort(iso: string): string {
   if (!iso) return '—'
   try {
-    return format(new Date(iso), 'dd/MM/yyyy', { locale: ptBR })
+    // Date-only strings (YYYY-MM-DD, from <input type="date">) must be parsed as
+    // local time, not UTC — otherwise `new Date(iso)` shifts the displayed date
+    // back a day in timezones behind UTC (e.g. Brazil).
+    const dateOnlyMatch = iso.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+    const date = dateOnlyMatch
+      ? new Date(Number(dateOnlyMatch[1]), Number(dateOnlyMatch[2]) - 1, Number(dateOnlyMatch[3]))
+      : new Date(iso)
+    return format(date, 'dd/MM/yyyy', { locale: ptBR })
   } catch {
     return '—'
   }
