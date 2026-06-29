@@ -2,9 +2,9 @@ import { useState, useEffect } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { differenceInDays } from 'date-fns'
 import {
-  Flame, ChevronLeft, Plus, Trash2, Check, Pencil,
+  Flame, ChevronLeft, ChevronRight, Plus, Trash2, Check, Pencil,
   TrendingUp, Calendar, Zap, CheckCircle2, ExternalLink,
-  CheckCircle, FileText, List,
+  CheckCircle, FileText, List, Users,
 } from 'lucide-react'
 import { useStore } from '../../store'
 import { Badge } from '../../components/ui/Badge'
@@ -88,6 +88,35 @@ function cronogramaStatusColor(s: DisparoAgendado['status']): string {
     : 'bg-blue-100 text-blue-800 border-blue-200'
 }
 
+// Soma os envios sem repetir a mesma lista (evita contar leads duplicados quando a mesma lista é disparada várias vezes)
+function computeLeadsUnicos(disparos: Disparo[], globalListas: GlobalLista[]): number {
+  const seen = new Set<string>()
+  let total = 0
+  disparos.forEach((d) => {
+    const key = d.listaId || d.nomeLista
+    if (!key || seen.has(key)) return
+    seen.add(key)
+    const lista = globalListas.find((l) => l.id === d.listaId)
+    total += lista?.totalContatos || d.totalLeads || 0
+  })
+  return total
+}
+
+const LIMITE_TIERS = [
+  { max: 250, label: 'Inicial', color: 'text-gray-600 bg-gray-100 border-gray-200' },
+  { max: 1000, label: 'Tier 1', color: 'text-blue-700 bg-blue-100 border-blue-200' },
+  { max: 10000, label: 'Tier 2', color: 'text-purple-700 bg-purple-100 border-purple-200' },
+  { max: 100000, label: 'Tier 3', color: 'text-orange-700 bg-orange-100 border-orange-200' },
+  { max: Infinity, label: 'Ilimitado', color: 'text-green-700 bg-green-100 border-green-200' },
+]
+
+function limiteTierInfo(limite: number) {
+  const idx = LIMITE_TIERS.findIndex((t) => limite <= t.max)
+  const tier = LIMITE_TIERS[idx === -1 ? LIMITE_TIERS.length - 1 : idx]
+  const proximo = LIMITE_TIERS[idx + 1]
+  return { ...tier, proximo: proximo?.max }
+}
+
 // ── Mini bar chart ─────────────────────────────────────────
 
 function MiniChart({ disparos }: { disparos: Disparo[] }) {
@@ -106,6 +135,58 @@ function MiniChart({ disparos }: { disparos: Disparo[] }) {
           <div className="flex-1 bg-emerald-300 rounded-t-sm" style={{ height: `${Math.max(((d.totalRespostas || 0) / maxVal) * 32, 1)}px` }} />
         </div>
       ))}
+    </div>
+  )
+}
+
+// ── Cronograma item ─────────────────────────────────────────
+
+function CronogramaItem({
+  c,
+  globalListas,
+  onEdit,
+  onDelete,
+}: {
+  c: DisparoAgendado
+  globalListas: GlobalLista[]
+  onEdit: () => void
+  onDelete: () => void
+}) {
+  const isPast = c.dataPlanejada < new Date().toISOString().slice(0, 10)
+  const lista = globalListas.find((l) => l.id === c.listaId)
+  return (
+    <div className={`flex items-center gap-3 p-3 rounded-xl border ${
+      c.status === 'realizado' ? 'bg-green-50 border-green-100' :
+      c.status === 'cancelado' ? 'bg-gray-50 border-gray-100 opacity-60' :
+      isPast ? 'bg-orange-50 border-orange-100' :
+      'bg-blue-50 border-blue-100'
+    }`}>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-sm font-semibold text-gray-900">{formatDateShort(c.dataPlanejada)}</span>
+          <Badge label={c.status === 'planejado' ? 'Planejado' : c.status === 'realizado' ? 'Realizado' : 'Cancelado'} className={cronogramaStatusColor(c.status)} />
+          {c.nomeLista && <span className="text-xs text-gray-600">{c.nomeLista}</span>}
+          {lista && <Badge label={lista.tipo.toUpperCase()} className={listaTipoColor(lista.tipo)} />}
+          {lista?.arquivo && <span className="text-xs text-gray-400">📄 {lista.arquivo}</span>}
+        </div>
+        <div className="flex items-center gap-3 mt-1">
+          {c.leadsPlanificados > 0 && (
+            <span className="text-xs text-gray-500">{c.leadsPlanificados.toLocaleString('pt-BR')} leads previstos</span>
+          )}
+          {c.observacoes && <span className="text-xs text-gray-400 italic">{c.observacoes}</span>}
+          {isPast && c.status === 'planejado' && (
+            <span className="text-xs text-orange-600 font-medium">⚠ Data passada</span>
+          )}
+        </div>
+      </div>
+      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 hover:opacity-100 transition-opacity flex-shrink-0">
+        <button onClick={onEdit} className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-100 rounded-lg">
+          <Pencil size={12} />
+        </button>
+        <button onClick={onDelete} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-100 rounded-lg">
+          <Trash2 size={12} />
+        </button>
+      </div>
     </div>
   )
 }
@@ -275,13 +356,16 @@ export function ClienteAquecimento() {
 
   // ── Computed values ────────────────────────────────────
   const disparosOrdenados = [...aq.disparos].sort((a, b) => b.data.localeCompare(a.data))
-  const totalLeads = aq.disparos.reduce((s, d) => s + (d.totalLeads || 0), 0)
+  const totalEnvios = aq.disparos.reduce((s, d) => s + (d.totalLeads || 0), 0)
   const totalRespostas = aq.disparos.reduce((s, d) => s + (d.totalRespostas || 0), 0)
-  const taxaResposta = totalLeads > 0 ? ((totalRespostas / totalLeads) * 100).toFixed(1) : '0'
+  const taxaResposta = totalEnvios > 0 ? ((totalRespostas / totalEnvios) * 100).toFixed(1) : '0'
+  const leadsUnicos = computeLeadsUnicos(aq.disparos, globalListas)
   const templatesAprovados = aq.templates.filter((t) => t.status === 'aprovado').length
   const diasAquecendo = aq.dataInicio ? differenceInDays(new Date(), new Date(aq.dataInicio)) : null
   const etapaAtual = ETAPA_OPTIONS.find((e) => e.value === aq.etapa)!
-  const cronogramaOrdenado = [...aq.cronograma].sort((a, b) => a.dataPlanejada.localeCompare(b.dataPlanejada))
+  const proximosCronograma = aq.cronograma.filter((c) => c.status === 'planejado').sort((a, b) => a.dataPlanejada.localeCompare(b.dataPlanejada))
+  const historicoCronograma = aq.cronograma.filter((c) => c.status !== 'planejado').sort((a, b) => b.dataPlanejada.localeCompare(a.dataPlanejada))
+  const tierInfo = limiteTierInfo(aq.limiteAtual)
 
   const bmLabel = activeTab === 'receptiva' ? 'BM Receptiva' : 'BM Ativa'
 
@@ -372,18 +456,39 @@ export function ClienteAquecimento() {
         <Stepper etapa={aq.etapa} onChange={(e) => applyAndSave({ etapa: e })} />
       </Card>
 
-      {/* ── Config + mini stats ── */}
-      <div className="grid grid-cols-3 gap-4">
-        <div>
-          <label className="block text-xs font-medium text-gray-700 mb-1">Limite de disparos atual</label>
-          <input
-            type="number"
-            value={aq.limiteAtual}
-            onChange={(e) => setAq('limiteAtual', Number(e.target.value))}
-            placeholder="Ex: 250"
-            className={inputCls}
-          />
+      {/* ── Limite de disparo (destaque) ── */}
+      <Card className="p-5 bg-gradient-to-br from-orange-50 to-white border-orange-100">
+        <div className="flex items-center justify-between gap-4 flex-wrap">
+          <div className="flex items-center gap-4">
+            <div>
+              <p className="text-xs text-gray-500 font-medium mb-1">Limite de disparo atual</p>
+              <div className="flex items-baseline gap-2">
+                <input
+                  type="number"
+                  value={aq.limiteAtual}
+                  onChange={(e) => setAq('limiteAtual', Number(e.target.value))}
+                  placeholder="Ex: 250"
+                  className="text-3xl font-bold text-gray-900 w-32 bg-transparent border-b-2 border-dashed border-orange-300 focus:outline-none focus:border-orange-500"
+                />
+                <span className="text-sm text-gray-400">msgs/dia</span>
+              </div>
+            </div>
+            <Badge label={tierInfo.label} className={tierInfo.color} />
+          </div>
+          {tierInfo.proximo && (
+            <div className="text-right">
+              <p className="text-xs text-gray-400">Próximo nível possível</p>
+              <p className="text-lg font-bold text-orange-600">{tierInfo.proximo.toLocaleString('pt-BR')}/dia</p>
+            </div>
+          )}
         </div>
+        <p className="text-xs text-gray-500 mt-3">
+          O objetivo do aquecimento é elevar este limite com disparos consistentes e boa taxa de resposta.
+        </p>
+      </Card>
+
+      {/* ── Config ── */}
+      <div className="grid grid-cols-2 gap-4">
         <div>
           <label className="block text-xs font-medium text-gray-700 mb-1">Início do aquecimento</label>
           <input
@@ -407,11 +512,12 @@ export function ClienteAquecimento() {
 
       {/* Mini stats */}
       {aq.etapa !== 'não_iniciado' && (
-        <div className="grid grid-cols-4 gap-3">
+        <div className="grid grid-cols-5 gap-3">
           {[
             { icon: <Calendar size={14} className="text-blue-600" />, bg: 'bg-blue-50 border-blue-100', value: diasAquecendo !== null ? `${diasAquecendo}d` : '—', label: 'aquecendo', textColor: 'text-blue-700' },
             { icon: <CheckCircle2 size={14} className="text-purple-600" />, bg: 'bg-purple-50 border-purple-100', value: `${templatesAprovados}/${aq.templates.length}`, label: 'templates aprovados', textColor: 'text-purple-700' },
             { icon: <Zap size={14} className="text-orange-600" />, bg: 'bg-orange-50 border-orange-100', value: String(aq.disparos.length), label: 'disparos realizados', textColor: 'text-orange-700' },
+            { icon: <Users size={14} className="text-indigo-600" />, bg: 'bg-indigo-50 border-indigo-100', value: leadsUnicos.toLocaleString('pt-BR'), label: 'leads únicos contatados', textColor: 'text-indigo-700' },
             { icon: <TrendingUp size={14} className="text-emerald-600" />, bg: 'bg-emerald-50 border-emerald-100', value: `${taxaResposta}%`, label: 'taxa de resposta', textColor: Number(taxaResposta) >= 10 ? 'text-emerald-700' : Number(taxaResposta) >= 5 ? 'text-yellow-700' : 'text-emerald-700' },
           ].map((s) => (
             <div key={s.label} className={`${s.bg} border rounded-xl p-3 flex items-center gap-2.5`}>
@@ -531,68 +637,44 @@ export function ClienteAquecimento() {
           <div className="flex items-center gap-2">
             <Calendar size={16} className="text-gray-400" />
             <h3 className="text-sm font-semibold text-gray-800">Cronograma de disparos</h3>
-            <span className="text-xs text-gray-400">{aq.cronograma.length} agendado{aq.cronograma.length !== 1 ? 's' : ''}</span>
+            <span className="text-xs text-gray-400">{proximosCronograma.length} próximo{proximosCronograma.length !== 1 ? 's' : ''}</span>
           </div>
           <Button variant="secondary" size="sm" onClick={() => setModal({ type: 'cronograma-add' })}>
             <Plus size={13} /> Planejar disparo
           </Button>
         </div>
 
-        {cronogramaOrdenado.length === 0 ? (
+        {aq.cronograma.length === 0 ? (
           <div className="py-8 flex flex-col items-center gap-2 text-gray-400 bg-gray-50 rounded-xl">
             <Calendar size={24} className="text-gray-300" />
             <p className="text-sm">Nenhum disparo planejado.</p>
             <p className="text-xs text-gray-400">Planeje os próximos disparos com data e lista prevista.</p>
           </div>
         ) : (
-          <div className="relative">
-            <div className="absolute left-[7px] top-1 bottom-1 w-px bg-gray-200" />
-            <div className="space-y-2">
-              {cronogramaOrdenado.map((c) => {
-                const isPast = c.dataPlanejada < new Date().toISOString().slice(0, 10)
-                const lista = globalListas.find((l) => l.id === c.listaId)
-                return (
-                  <div key={c.id} className="pl-6 relative group">
-                    <div className={`absolute left-0 top-3 w-3.5 h-3.5 rounded-full border-2 border-white shadow-sm
-                      ${c.status === 'realizado' ? 'bg-green-400' : c.status === 'cancelado' ? 'bg-red-400' : isPast ? 'bg-orange-400' : 'bg-blue-400'}`}
-                    />
-                    <div className={`flex items-center gap-3 p-3 rounded-xl border ${
-                      c.status === 'realizado' ? 'bg-green-50 border-green-100' :
-                      c.status === 'cancelado' ? 'bg-gray-50 border-gray-100 opacity-60' :
-                      isPast ? 'bg-orange-50 border-orange-100' :
-                      'bg-blue-50 border-blue-100'
-                    }`}>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="text-sm font-semibold text-gray-900">{formatDateShort(c.dataPlanejada)}</span>
-                          <Badge label={c.status === 'planejado' ? 'Planejado' : c.status === 'realizado' ? 'Realizado' : 'Cancelado'} className={cronogramaStatusColor(c.status)} />
-                          {c.nomeLista && <span className="text-xs text-gray-600">{c.nomeLista}</span>}
-                          {lista && <Badge label={lista.tipo.toUpperCase()} className={listaTipoColor(lista.tipo)} />}
-                          {lista?.arquivo && <span className="text-xs text-gray-400">📄 {lista.arquivo}</span>}
-                        </div>
-                        <div className="flex items-center gap-3 mt-1">
-                          {c.leadsPlanificados > 0 && (
-                            <span className="text-xs text-gray-500">{c.leadsPlanificados.toLocaleString('pt-BR')} leads previstos</span>
-                          )}
-                          {c.observacoes && <span className="text-xs text-gray-400 italic">{c.observacoes}</span>}
-                          {isPast && c.status === 'planejado' && (
-                            <span className="text-xs text-orange-600 font-medium">⚠ Data passada</span>
-                          )}
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
-                        <button onClick={() => setModal({ type: 'cronograma-edit', data: { ...c } })} className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-100 rounded-lg">
-                          <Pencil size={12} />
-                        </button>
-                        <button onClick={() => deleteCronograma(c.id)} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-100 rounded-lg">
-                          <Trash2 size={12} />
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
+          <div className="space-y-5">
+            {proximosCronograma.length > 0 ? (
+              <div className="space-y-2">
+                {proximosCronograma.map((c) => (
+                  <CronogramaItem key={c.id} c={c} globalListas={globalListas} onEdit={() => setModal({ type: 'cronograma-edit', data: { ...c } })} onDelete={() => deleteCronograma(c.id)} />
+                ))}
+              </div>
+            ) : (
+              <p className="text-xs text-gray-400 italic">Nenhum disparo planejado para os próximos dias.</p>
+            )}
+
+            {historicoCronograma.length > 0 && (
+              <details className="group">
+                <summary className="text-xs font-medium text-gray-500 hover:text-gray-700 cursor-pointer list-none flex items-center gap-1.5">
+                  <ChevronRight size={12} className="transition-transform group-open:rotate-90" />
+                  Histórico ({historicoCronograma.length} realizado{historicoCronograma.length !== 1 ? 's' : ''}/cancelado{historicoCronograma.length !== 1 ? 's' : ''})
+                </summary>
+                <div className="space-y-2 mt-3">
+                  {historicoCronograma.map((c) => (
+                    <CronogramaItem key={c.id} c={c} globalListas={globalListas} onEdit={() => setModal({ type: 'cronograma-edit', data: { ...c } })} onDelete={() => deleteCronograma(c.id)} />
+                  ))}
+                </div>
+              </details>
+            )}
           </div>
         )}
       </Card>
@@ -611,10 +693,11 @@ export function ClienteAquecimento() {
         </div>
 
         {aq.disparos.length > 0 && (
-          <div className="grid grid-cols-4 gap-3 mb-4 p-4 bg-gradient-to-br from-blue-50 to-emerald-50 rounded-xl border border-blue-100">
+          <div className="grid grid-cols-5 gap-3 mb-4 p-4 bg-gradient-to-br from-blue-50 to-emerald-50 rounded-xl border border-blue-100">
             {[
               { label: 'Disparos', value: String(aq.disparos.length), color: 'text-blue-700' },
-              { label: 'Leads', value: totalLeads.toLocaleString('pt-BR'), color: 'text-blue-700' },
+              { label: 'Total de envios', value: totalEnvios.toLocaleString('pt-BR'), color: 'text-blue-700' },
+              { label: 'Leads únicos', value: leadsUnicos.toLocaleString('pt-BR'), color: 'text-indigo-700' },
               { label: 'Respostas', value: totalRespostas.toLocaleString('pt-BR'), color: 'text-emerald-700' },
               { label: 'Taxa', value: `${taxaResposta}%`, color: Number(taxaResposta) >= 10 ? 'text-emerald-700' : Number(taxaResposta) >= 5 ? 'text-yellow-700' : 'text-red-600' },
             ].map((s) => (
@@ -630,7 +713,7 @@ export function ClienteAquecimento() {
           <div className="mb-4 px-2">
             <MiniChart disparos={aq.disparos} />
             <div className="flex items-center gap-3 mt-1.5">
-              <div className="flex items-center gap-1"><div className="w-2 h-2 bg-blue-300 rounded-sm" /><span className="text-[10px] text-gray-400">Leads</span></div>
+              <div className="flex items-center gap-1"><div className="w-2 h-2 bg-blue-300 rounded-sm" /><span className="text-[10px] text-gray-400">Envios</span></div>
               <div className="flex items-center gap-1"><div className="w-2 h-2 bg-emerald-300 rounded-sm" /><span className="text-[10px] text-gray-400">Respostas</span></div>
             </div>
           </div>
@@ -656,7 +739,7 @@ export function ClienteAquecimento() {
                   </div>
                   <div className="flex items-center gap-3 mt-1 flex-wrap">
                     <p className="text-xs text-gray-600">
-                      <span className="font-semibold text-blue-700">{(d.totalLeads || 0).toLocaleString('pt-BR')}</span> leads
+                      <span className="font-semibold text-blue-700">{(d.totalLeads || 0).toLocaleString('pt-BR')}</span> envios
                       {' → '}
                       <span className="font-semibold text-emerald-700">{(d.totalRespostas || 0).toLocaleString('pt-BR')}</span> respostas
                       {(d.totalLeads || 0) > 0 && (
@@ -882,7 +965,7 @@ function DisparoForm({
   onCancel: () => void
 }) {
   const [v, setV] = useState<Omit<Disparo, 'id'> | Disparo>(
-    initial ?? { data: new Date().toISOString().slice(0, 10), nomeLista: '', arquivoLista: '', totalLeads: 0, totalRespostas: 0, qualidade: '', observacoes: '' }
+    initial ?? { data: new Date().toISOString().slice(0, 10), nomeLista: '', arquivoLista: '', listaId: '', totalLeads: 0, totalRespostas: 0, qualidade: '', observacoes: '' }
   )
   const set = <K extends keyof typeof v>(k: K, val: (typeof v)[K]) => setV((f) => ({ ...f, [k]: val }))
   const taxa = (v.totalLeads || 0) > 0
@@ -899,6 +982,7 @@ function DisparoForm({
             if (lista) {
               set('nomeLista', lista.nome)
               set('arquivoLista', lista.arquivo)
+              set('listaId', lista.id)
               if (lista.totalContatos) set('totalLeads', lista.totalContatos)
             }
           }} className={inputCls} defaultValue="">

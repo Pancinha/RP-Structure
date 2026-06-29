@@ -138,6 +138,7 @@ export interface Disparo {
   data: string
   nomeLista: string
   arquivoLista: string
+  listaId: string
   totalLeads: number
   totalRespostas: number
   qualidade: 'Boa' | 'Média' | 'Ruim' | ''

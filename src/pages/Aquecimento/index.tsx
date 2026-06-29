@@ -4,7 +4,7 @@ import { differenceInDays } from 'date-fns'
 import {
   Flame, ChevronRight, Zap, Users, TrendingUp, BarChart2,
   AlertTriangle, Clock, CheckCircle2, MessageSquare, Target,
-  ArrowRight, Search, ThumbsDown, Activity, Filter,
+  ArrowRight, Search, ThumbsDown, Activity, Filter, Gauge,
   List, Plus, Pencil, Trash2, Download, Upload, FileText,
 } from 'lucide-react'
 import { useStore } from '../../store'
@@ -392,6 +392,34 @@ function resolveAq(bm: BMData): AquecimentoBM {
   }
 }
 
+// Soma envios sem repetir a mesma lista por linha (evita contar leads duplicados quando a mesma lista é disparada várias vezes)
+function computeLeadsUnicos(disparos: EnrichedDisparo[], globalListas: GlobalLista[]): number {
+  const seen = new Set<string>()
+  let total = 0
+  disparos.forEach((d) => {
+    const key = d.listaId ? `id:${d.listaId}` : `name:${d.clientId}:${d.tipo}:${d.nomeLista}`
+    if (!d.nomeLista && !d.listaId) return
+    if (seen.has(key)) return
+    seen.add(key)
+    const lista = d.listaId ? globalListas.find((l) => l.id === d.listaId) : undefined
+    total += lista?.totalContatos || d.totalLeads || 0
+  })
+  return total
+}
+
+const LIMITE_TIERS = [
+  { max: 250, label: '250', color: 'bg-gray-100 text-gray-600 border-gray-200' },
+  { max: 1000, label: '1k', color: 'bg-blue-100 text-blue-700 border-blue-200' },
+  { max: 10000, label: '10k', color: 'bg-purple-100 text-purple-700 border-purple-200' },
+  { max: 100000, label: '100k', color: 'bg-orange-100 text-orange-700 border-orange-200' },
+  { max: Infinity, label: 'Ilimitado', color: 'bg-green-100 text-green-700 border-green-200' },
+]
+
+function limiteTierInfo(limite: number) {
+  const idx = LIMITE_TIERS.findIndex((t) => limite <= t.max)
+  return LIMITE_TIERS[idx === -1 ? LIMITE_TIERS.length - 1 : idx]
+}
+
 type TipoFilter = 'todos' | 'receptiva' | 'ativa'
 type EtapaFilter = 'todas' | EtapaAquecimento
 
@@ -436,7 +464,7 @@ function DisparosBarChart({
       <div className="mt-3 pt-3 border-t border-gray-100 flex items-center gap-5">
         <div className="flex items-center gap-1.5">
           <div className="w-3 h-3 rounded-sm bg-blue-400/75" />
-          <span className="text-xs text-gray-500">Leads enviados</span>
+          <span className="text-xs text-gray-500">Envios (por disparo)</span>
         </div>
         <div className="flex items-center gap-1.5">
           <div className="w-3 h-3 rounded-sm bg-emerald-400/75" />
@@ -523,6 +551,7 @@ function TaxaLineChart({
 
 export function Aquecimento() {
   const clients = useStore((s) => s.clients)
+  const globalListas = useStore((s) => s.globalListas)
   const navigate = useNavigate()
   const [activeTab, setActiveTab] = useState<'dashboard' | 'listas'>('dashboard')
   const [tipoFilter, setTipoFilter] = useState<TipoFilter>('todos')
@@ -560,13 +589,14 @@ export function Aquecimento() {
   const stats = useMemo(() => {
     const bmsAtivas = rows.filter((r) => r.aq.etapa !== 'não_iniciado').length
     const bmsAquecidas = rows.filter((r) => r.aq.etapa === 'aquecida').length
-    const totalLeads = allDisparos.reduce((s, d) => s + (d.totalLeads || 0), 0)
+    const totalEnvios = allDisparos.reduce((s, d) => s + (d.totalLeads || 0), 0)
     const totalRespostas = allDisparos.reduce((s, d) => s + (d.totalRespostas || 0), 0)
-    const taxaMedia = totalLeads > 0 ? (totalRespostas / totalLeads) * 100 : 0
+    const taxaMedia = totalEnvios > 0 ? (totalRespostas / totalEnvios) * 100 : 0
+    const leadsUnicos = computeLeadsUnicos(allDisparos, globalListas)
     const templatesAprovados = rows.reduce((s, r) => s + r.aq.templates.filter((t) => t.status === 'aprovado').length, 0)
     const templatesTotal = rows.reduce((s, r) => s + r.aq.templates.length, 0)
-    return { bmsAtivas, bmsAquecidas, totalLeads, totalRespostas, taxaMedia, templatesAprovados, templatesTotal }
-  }, [rows, allDisparos])
+    return { bmsAtivas, bmsAquecidas, totalEnvios, totalRespostas, taxaMedia, leadsUnicos, templatesAprovados, templatesTotal }
+  }, [rows, allDisparos, globalListas])
 
   const pipelineCounts = useMemo(() => {
     const counts = Object.fromEntries(ETAPA_ORDER.map((e) => [e, 0])) as Record<EtapaAquecimento, number>
@@ -645,6 +675,18 @@ export function Aquecimento() {
     [rows]
   )
 
+  const limiteBreakdown = useMemo(() => {
+    const ativas = rows.filter((r) => r.aq.etapa !== 'não_iniciado')
+    const porBm = ativas
+      .map((r) => ({ clientId: r.clientId, clientNome: r.clientNome, tipo: r.tipo, limite: r.aq.limiteAtual, tier: limiteTierInfo(r.aq.limiteAtual) }))
+      .sort((a, b) => b.limite - a.limite)
+    const counts = LIMITE_TIERS.map((t) => ({
+      ...t,
+      count: porBm.filter((b) => b.tier.label === t.label).length,
+    }))
+    return { porBm, counts }
+  }, [rows])
+
   const filtered = useMemo(
     () =>
       rows.filter((r) => {
@@ -709,7 +751,7 @@ export function Aquecimento() {
       {activeTab === 'dashboard' && (<>
 
       {/* ── Stats row ───────────────────────────────────── */}
-      <div className="grid grid-cols-2 xl:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4">
           <div className="flex items-start justify-between gap-2">
             <div>
@@ -731,11 +773,23 @@ export function Aquecimento() {
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4">
           <div className="flex items-start justify-between gap-2">
             <div>
-              <p className="text-xs text-gray-500 font-medium">Total de leads</p>
-              <p className="text-3xl font-bold text-gray-900 mt-1">{stats.totalLeads.toLocaleString('pt-BR')}</p>
-              <p className="text-xs text-gray-400 mt-0.5">{allDisparos.length} disparos realizados</p>
+              <p className="text-xs text-gray-500 font-medium">Total de envios</p>
+              <p className="text-3xl font-bold text-gray-900 mt-1">{stats.totalEnvios.toLocaleString('pt-BR')}</p>
+              <p className="text-xs text-gray-400 mt-0.5">{allDisparos.length} disparos · pode repetir lista</p>
             </div>
             <div className="bg-blue-100 text-blue-600 p-2 rounded-lg flex-shrink-0">
+              <Zap size={18} />
+            </div>
+          </div>
+        </div>
+        <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4">
+          <div className="flex items-start justify-between gap-2">
+            <div>
+              <p className="text-xs text-gray-500 font-medium">Leads únicos contatados</p>
+              <p className="text-3xl font-bold text-gray-900 mt-1">{stats.leadsUnicos.toLocaleString('pt-BR')}</p>
+              <p className="text-xs text-gray-400 mt-0.5">sem repetir a mesma lista</p>
+            </div>
+            <div className="bg-indigo-100 text-indigo-600 p-2 rounded-lg flex-shrink-0">
               <Users size={18} />
             </div>
           </div>
@@ -778,6 +832,52 @@ export function Aquecimento() {
           )}
         </div>
       </div>
+
+      {/* ── Limite por BM (destaque) ─────────────────────── */}
+      {limiteBreakdown.porBm.length > 0 && (
+        <Card className="p-5">
+          <div className="flex items-center gap-2 mb-1">
+            <Gauge size={15} className="text-gray-400" />
+            <h2 className="text-sm font-semibold text-gray-700">Limite de disparo por BM</h2>
+          </div>
+          <p className="text-xs text-gray-400 mb-4">o objetivo do aquecimento é elevar este limite — acompanhe a evolução de cada BM</p>
+
+          <div className="flex h-2.5 rounded-full overflow-hidden bg-gray-100 mb-2">
+            {limiteBreakdown.counts.filter((c) => c.count > 0).map((c) => (
+              <div
+                key={c.label}
+                className={c.color.split(' ')[0]}
+                style={{ width: `${(c.count / limiteBreakdown.porBm.length) * 100}%` }}
+                title={`${c.label}: ${c.count} BM(s)`}
+              />
+            ))}
+          </div>
+          <div className="flex items-center gap-3 mb-4 flex-wrap">
+            {limiteBreakdown.counts.filter((c) => c.count > 0).map((c) => (
+              <span key={c.label} className="flex items-center gap-1.5 text-xs text-gray-500">
+                <span className={`w-2 h-2 rounded-full ${c.color.split(' ')[0]}`} />
+                {c.count} em {c.label}
+              </span>
+            ))}
+          </div>
+
+          <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-2">
+            {limiteBreakdown.porBm.map((b) => (
+              <button
+                key={`${b.clientId}-${b.tipo}`}
+                onClick={() => navigate(`/aquecimento/${b.clientId}`)}
+                className="flex items-center justify-between gap-2 p-2.5 bg-gray-50 hover:bg-gray-100 rounded-lg border border-gray-100 transition-colors text-left"
+              >
+                <span className="text-xs text-gray-700 truncate">
+                  {b.clientNome}
+                  <span className="text-gray-400 ml-1">({b.tipo === 'receptiva' ? 'Rec' : 'Ati'})</span>
+                </span>
+                <Badge label={b.limite > 0 ? b.limite.toLocaleString('pt-BR') : '—'} className={b.tier.color} />
+              </button>
+            ))}
+          </div>
+        </Card>
+      )}
 
       {/* ── Pipeline funil ──────────────────────────────── */}
       <Card className="p-5">
@@ -842,12 +942,26 @@ export function Aquecimento() {
       {/* ── Charts row ──────────────────────────────────── */}
       <div className="grid grid-cols-3 gap-4">
         <Card className="col-span-2 p-5">
-          <div className="flex items-center gap-2 mb-4">
-            <BarChart2 size={15} className="text-gray-400" />
-            <h2 className="text-sm font-semibold text-gray-700">Histórico de disparos</h2>
-            <span className="text-xs text-gray-400">
-              {chartDisparos.length > 0 ? `últimos ${chartDisparos.length}` : ''}
-            </span>
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <BarChart2 size={15} className="text-gray-400" />
+              <h2 className="text-sm font-semibold text-gray-700">Histórico de disparos</h2>
+              <span className="text-xs text-gray-400">
+                {chartDisparos.length > 0 ? `últimos ${chartDisparos.length}` : ''}
+              </span>
+            </div>
+            {chartDisparos.length > 0 && (
+              <div className="flex items-center gap-4 text-right">
+                <div>
+                  <p className="text-lg font-bold text-blue-700 leading-none">{chartDisparos.reduce((s, d) => s + d.leads, 0).toLocaleString('pt-BR')}</p>
+                  <p className="text-[10px] text-gray-400">envios</p>
+                </div>
+                <div>
+                  <p className="text-lg font-bold text-emerald-700 leading-none">{chartDisparos.reduce((s, d) => s + d.respostas, 0).toLocaleString('pt-BR')}</p>
+                  <p className="text-[10px] text-gray-400">respostas</p>
+                </div>
+              </div>
+            )}
           </div>
           <DisparosBarChart items={chartDisparos} />
         </Card>
@@ -897,10 +1011,18 @@ export function Aquecimento() {
       {/* ── Tendência (line chart) ───────────────────────── */}
       {taxaTrendData.values.length >= 2 && (
         <Card className="p-5">
-          <div className="flex items-center gap-2 mb-4">
-            <Activity size={15} className="text-gray-400" />
-            <h2 className="text-sm font-semibold text-gray-700">Tendência da taxa de resposta</h2>
-            <span className="text-xs text-gray-400">por disparo, todos os clientes</span>
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <Activity size={15} className="text-gray-400" />
+              <h2 className="text-sm font-semibold text-gray-700">Tendência da taxa de resposta</h2>
+              <span className="text-xs text-gray-400">por disparo, todos os clientes</span>
+            </div>
+            <div className="text-right">
+              <p className={`text-lg font-bold leading-none ${taxaTrendData.values[taxaTrendData.values.length - 1] >= 10 ? 'text-green-700' : taxaTrendData.values[taxaTrendData.values.length - 1] >= 5 ? 'text-yellow-700' : 'text-gray-700'}`}>
+                {taxaTrendData.values[taxaTrendData.values.length - 1].toFixed(1)}%
+              </p>
+              <p className="text-[10px] text-gray-400">taxa atual</p>
+            </div>
           </div>
           <TaxaLineChart values={taxaTrendData.values} labels={taxaTrendData.labels} />
         </Card>
@@ -1012,7 +1134,7 @@ export function Aquecimento() {
               <tr className="bg-gray-50/60 border-b border-gray-100">
                 {[
                   'Cliente', 'Tipo', 'Nome BM', 'Etapa', 'Templates', 'Disparos',
-                  'Leads', 'Respostas', 'Taxa', 'Últ. qualidade', 'Limite', 'Últ. disparo', '',
+                  'Envios', 'Respostas', 'Taxa', 'Últ. qualidade', 'Limite', 'Últ. disparo', '',
                 ].map((h) => (
                   <th
                     key={h}
@@ -1072,8 +1194,12 @@ export function Aquecimento() {
                         <span className="text-xs text-gray-300">—</span>
                       )}
                     </td>
-                    <td className="px-4 py-3 text-gray-700">
-                      {r.aq.limiteAtual > 0 ? r.aq.limiteAtual.toLocaleString('pt-BR') : '—'}
+                    <td className="px-4 py-3">
+                      {r.aq.limiteAtual > 0 ? (
+                        <Badge label={r.aq.limiteAtual.toLocaleString('pt-BR')} className={limiteTierInfo(r.aq.limiteAtual).color} />
+                      ) : (
+                        <span className="text-xs text-gray-300">—</span>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-xs text-gray-500 whitespace-nowrap">
                       {ultimoDisparo ? formatDateShort(ultimoDisparo.data) : '—'}
@@ -1098,13 +1224,13 @@ export function Aquecimento() {
         </div>
       </Card>
 
-      {/* ── Cronograma de atividades ─────────────────────── */}
+      {/* ── Atividade recente (disparos já realizados) ───── */}
       {allDisparos.length > 0 && (
         <Card className="p-5">
           <div className="flex items-center gap-2 mb-5">
             <MessageSquare size={15} className="text-gray-400" />
-            <h2 className="text-sm font-semibold text-gray-700">Cronograma de atividades</h2>
-            <span className="text-xs text-gray-400">últimos disparos registrados</span>
+            <h2 className="text-sm font-semibold text-gray-700">Atividade recente</h2>
+            <span className="text-xs text-gray-400">últimos disparos já realizados, mais recente primeiro</span>
           </div>
           <div className="relative">
             <div className="absolute left-[7px] top-1 bottom-1 w-px bg-gray-200" />
@@ -1145,7 +1271,7 @@ export function Aquecimento() {
                         <span className="font-semibold text-blue-700">
                           {(d.totalLeads || 0).toLocaleString('pt-BR')}
                         </span>{' '}
-                        leads
+                        envios
                         {' → '}
                         <span className="font-semibold text-emerald-700">
                           {(d.totalRespostas || 0).toLocaleString('pt-BR')}
